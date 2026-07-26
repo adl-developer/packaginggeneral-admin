@@ -2,7 +2,7 @@
 
 Custom-branded operations portal, built from the Figma section **New Admin Designs**
 (`3803:4076` in file `uFyZPtj1mgKqkaBMo8lRA7`). Standalone Next.js 16 app; runs on
-**port 3001** so it can sit alongside the storefront (3000).
+**port 3001** so it can sit alongside the storefront (3000)..
 
 ```bash
 npm install
