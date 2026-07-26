@@ -9,12 +9,6 @@ npm install
 npm run dev
 ```
 
-## Why this exists
-
-The stock Medusa Admin was judged too complex for the client's team, and menu items
-need to be withheld per role. Medusa v2 has no supported way to hide its built-in
-sidebar entries, so the portal is a separate frontend over Medusa's Admin API.
-
 ## Status
 
 - **UI** — complete, all 11 Figma frames parity-checked against pulled specs.
