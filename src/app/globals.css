@@ -1,0 +1,100 @@
+@import "tailwindcss";
+
+/*
+  Packaging General — Admin portal design tokens.
+
+  Verified against Figma section "New Admin Designs" (3803:4076) on 2026-07-25;
+  full spec table in ../../design-reference/admin/README.md. The palette is
+  IDENTICAL to the storefront's, so these values are copied verbatim from
+  storefront/src/app/globals.css and must stay in sync with it.
+
+  Tailwind v4 CSS-first config: every token generates utilities, e.g.
+  --color-brand -> bg-brand/text-brand/border-brand, --radius-card -> rounded-card.
+*/
+@theme {
+  /* Brand & surfaces */
+  --color-background: #e8e5de; /* warm cream page background */
+  --color-surface: #fefdfb; /* cards, header, footer, inputs */
+  --color-brand: #3d3428; /* kraft brown — primary text + buttons */
+  --color-brand-foreground: #fefdfb; /* text on brand surfaces */
+
+  /* Text */
+  --color-muted: #7a7575; /* secondary text, inactive tab labels */
+
+  /* Lines */
+  --color-line: #c4bcb0; /* every border in the admin, and the TabsList track */
+
+  /* Accents carried over from the storefront palette (used sparingly here) */
+  --color-accent: #b8a8d9;
+  --color-plum: #9b6b8f;
+  --color-rust: #964022;
+
+  /* Feedback */
+  --color-destructive: #e7000b;
+  --color-destructive-border: #fb2c36;
+
+  /* Radii (semantic) — from Figma */
+  --radius-button: 14px; /* buttons, inputs, tab triggers */
+  --radius-panel: 16px; /* TabsList track, filter bar */
+  --radius-card: 20px; /* cards, dialogs */
+
+  /*
+    Typography — Figma-exact.
+
+    ⚠ The 30px and 24px letter-spacings are POSITIVE here. The storefront
+    intentionally tightened its display headings past Figma (text-3xl = -0.4px)
+    per client preference; the admin uses Figma's raw values because these sizes
+    render data readouts (order counts, revenue), not display headings.
+    Don't reconcile the two without asking.
+  */
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system,
+    sans-serif;
+  --text-xs--letter-spacing: 0px; /* 12px — badges, chips, filter labels */
+  --text-sm--letter-spacing: -0.15px; /* 14px — buttons, tabs, inputs, labels */
+  --text-base--letter-spacing: -0.312px; /* 16px — card titles + descriptions */
+  --text-2xl--letter-spacing: 0.07px; /* 24px — revenue value */
+  --text-3xl--letter-spacing: 0.396px; /* 30px — page H1 + stat values */
+
+  /* Header elevation (matches the storefront header) */
+  --shadow-header: 0px 1px 1.5px rgba(0, 0, 0, 0.1),
+    0px 1px 1px rgba(0, 0, 0, 0.1);
+}
+
+html {
+  /* Single light theme — declare it so Chrome/Edge auto-dark doesn't invert. */
+  color-scheme: light;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  background: var(--color-background);
+  color: var(--color-brand);
+  font-family: var(--font-sans);
+}
+
+/* Tailwind v4 ships Preflight without the legacy button cursor reset. */
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]),
+[role="tab"],
+[role="menuitem"],
+summary,
+label[for] {
+  cursor: pointer;
+}
+
+button:disabled,
+[role="button"][aria-disabled="true"] {
+  cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
