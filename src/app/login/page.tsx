@@ -1,4 +1,3 @@
-import { AdminFooter } from "@/components/layout/admin-footer";
 import { AdminHeader } from "@/components/layout/admin-header";
 import { LoginForm } from "@/components/auth/login-form";
 import { isDemoMode } from "@/lib/auth/config";
@@ -25,8 +24,6 @@ export default function LoginPage() {
       <main className="mx-auto flex w-full max-w-[1280px] flex-1 items-center justify-center px-4 py-16">
         <LoginForm demo={isDemoMode()} />
       </main>
-
-      <AdminFooter />
     </div>
   );
 }

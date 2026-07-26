@@ -4,52 +4,87 @@ import * as React from "react";
 import type { RangeKey } from "@/components/layout/date-filter-bar";
 import type { Order } from "@/lib/data/types";
 
-const DAYS: Record<Exclude<RangeKey, null>, number> = {
+export const RANGE_DAYS: Record<Exclude<RangeKey, null>, number> = {
   "7d": 7,
   "30d": 30,
   "60d": 60,
   "90d": 90,
 };
 
+const iso = (d: Date) => d.toISOString().slice(0, 10);
+
+/**
+ * Start/end dates for a preset, counting back from today.
+ *
+ * The window is INCLUSIVE of today, so "Last 7d" spans today plus the previous
+ * six days. Anchored to the real clock rather than to the newest order, because
+ * these dates are now written into the visible inputs — showing a window that
+ * didn't end today would read as wrong.
+ */
+export function presetRange(key: Exclude<RangeKey, null>) {
+  const today = new Date();
+  const from = new Date(today);
+  from.setDate(today.getDate() - (RANGE_DAYS[key] - 1));
+  return { from: iso(from), to: iso(today) };
+}
+
 /**
  * Shared date-range filter behind the filter bar on Overview and Orders.
  *
- * The mock fixtures are dated mid-2026, so "Last 7d" relative to the real
- * clock would empty the table. Ranges are therefore measured back from the
- * most recent order in the data — which is what the designs depict.
+ * Presets are just a shortcut for filling `start`/`end` — the filtering itself
+ * only ever reads those two values, so a preset and a hand-typed range behave
+ * identically. `range` is retained purely to highlight the active chip, and is
+ * cleared as soon as either date is edited by hand.
  */
 export function useDateFilter(orders: Order[]) {
   const [start, setStart] = React.useState("");
   const [end, setEnd] = React.useState("");
   const [range, setRange] = React.useState<RangeKey>(null);
 
-  const latest = React.useMemo(
+  const filtered = React.useMemo(
     () =>
-      orders.reduce(
-        (max, o) => (o.placedAt > max ? o.placedAt : max),
-        orders[0]?.placedAt ?? "",
-      ),
-    [orders],
+      orders.filter((o) => {
+        if (start && o.placedAt < start) return false;
+        if (end && o.placedAt > end) return false;
+        return true;
+      }),
+    [orders, start, end],
   );
 
-  const filtered = React.useMemo(() => {
-    let from = start;
-    let to = end;
+  /** Apply a preset: fills both inputs and marks the chip active. */
+  const applyPreset = React.useCallback((key: Exclude<RangeKey, null>) => {
+    const { from, to } = presetRange(key);
+    setStart(from);
+    setEnd(to);
+    setRange(key);
+  }, []);
 
-    if (range && latest) {
-      const anchor = new Date(latest);
-      const back = new Date(anchor);
-      back.setDate(anchor.getDate() - DAYS[range]);
-      from = back.toISOString().slice(0, 10);
-      to = latest;
-    }
+  /** Clear the whole range (used when toggling the active chip back off). */
+  const clearRange = React.useCallback(() => {
+    setStart("");
+    setEnd("");
+    setRange(null);
+  }, []);
 
-    return orders.filter((o) => {
-      if (from && o.placedAt < from) return false;
-      if (to && o.placedAt > to) return false;
-      return true;
-    });
-  }, [orders, start, end, range, latest]);
+  /** Hand-editing a date drops the preset highlight but keeps the value. */
+  const editStart = React.useCallback((v: string) => {
+    setStart(v);
+    setRange(null);
+  }, []);
 
-  return { start, end, range, setStart, setEnd, setRange, filtered };
+  const editEnd = React.useCallback((v: string) => {
+    setEnd(v);
+    setRange(null);
+  }, []);
+
+  return {
+    start,
+    end,
+    range,
+    filtered,
+    applyPreset,
+    clearRange,
+    editStart,
+    editEnd,
+  };
 }

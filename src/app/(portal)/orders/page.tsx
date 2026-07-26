@@ -50,8 +50,16 @@ export default function OrdersPage() {
     addNote,
     assignWorker,
   } = useAdmin();
-  const { start, end, range, setStart, setEnd, setRange, filtered } =
-    useDateFilter(orders);
+  const {
+    start,
+    end,
+    range,
+    filtered,
+    applyPreset,
+    clearRange,
+    editStart,
+    editEnd,
+  } = useDateFilter(orders);
 
   const [query, setQuery] = React.useState("");
   const [status, setStatus] = React.useState<OrderStatus | "">("");
@@ -85,9 +93,10 @@ export default function OrdersPage() {
         start={start}
         end={end}
         range={range}
-        onStart={setStart}
-        onEnd={setEnd}
-        onRange={setRange}
+        onStart={editStart}
+        onEnd={editEnd}
+        onPreset={applyPreset}
+        onClear={clearRange}
         showing={filtered.length}
         total={TOTAL_ORDERS_ALL_TIME}
       />

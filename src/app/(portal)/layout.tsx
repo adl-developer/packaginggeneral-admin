@@ -1,12 +1,15 @@
-import { AdminFooter } from "@/components/layout/admin-footer";
 import { PortalHeader } from "@/components/layout/portal-header";
 import { PortalTabs } from "@/components/layout/portal-tabs";
 import { AdminProvider } from "@/lib/store";
 
 /**
  * Portal shell — every signed-in admin screen.
- * Figma: header (69) → main container 1280 with padding 56/40/32/40 → footer.
+ * Figma: header (69) → main container 1280 with padding 56/40/32/40.
  * The H1 and tab bar are part of the shell; only the tab panel changes.
+ *
+ * The Figma frames show the storefront footer beneath every admin screen; it is
+ * intentionally omitted — this is an internal tool and the marketing footer adds
+ * nothing here. `AdminFooter` is kept in components/layout/ if it's ever wanted back.
  */
 export default function PortalLayout({
   children,
@@ -24,7 +27,6 @@ export default function PortalLayout({
           <PortalTabs />
           <div className="pt-6">{children}</div>
         </main>
-        <AdminFooter />
       </div>
     </AdminProvider>
   );
