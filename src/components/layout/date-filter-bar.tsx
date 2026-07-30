@@ -33,6 +33,7 @@ export function DateFilterBar({
   onClear,
   showing,
   total,
+  noun = "orders",
 }: {
   start: string;
   end: string;
@@ -43,6 +44,7 @@ export function DateFilterBar({
   onClear: () => void;
   showing: number;
   total: number;
+  noun?: string;
 }) {
   return (
     <div className="mt-5 flex flex-wrap items-end gap-3 rounded-panel border border-line bg-[rgba(196,188,176,0.3)] p-4">
@@ -90,7 +92,7 @@ export function DateFilterBar({
       </div>
 
       <p className="mb-2 ml-auto text-xs leading-4 text-muted">
-        {showing} of {total} orders
+        {showing} of {total} {noun}
       </p>
     </div>
   );
