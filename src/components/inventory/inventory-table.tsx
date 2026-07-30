@@ -24,6 +24,19 @@ function AlertCell({
   mixed?: boolean;
   inAlert: boolean;
 }) {
+  // in_alert must win over "mixed": a product actively being managed (one
+  // variant thresholded and below it) must never read as neutral just
+  // because another variant disagrees on the threshold value. The bell +
+  // alert colour still show; "Mixed" replaces the "at N" figure since there
+  // is no single number to report.
+  if (inAlert) {
+    return (
+      <span className={`inline-flex flex-col items-center gap-0.5 ${ALERT_TEXT_CLASS}`}>
+        <Bell className="size-4" aria-hidden />
+        <span className="text-xs">{mixed ? "Mixed" : `at ${nf.format(threshold as number)}`}</span>
+      </span>
+    );
+  }
   if (mixed) {
     return <span className="text-xs text-muted">Mixed</span>;
   }
@@ -36,11 +49,7 @@ function AlertCell({
     );
   }
   return (
-    <span
-      className={`inline-flex flex-col items-center gap-0.5 ${
-        inAlert ? ALERT_TEXT_CLASS : "text-muted"
-      }`}
-    >
+    <span className="inline-flex flex-col items-center gap-0.5 text-muted">
       <Bell className="size-4" aria-hidden />
       <span className="text-xs">at {nf.format(threshold)}</span>
     </span>

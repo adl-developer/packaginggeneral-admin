@@ -9,9 +9,9 @@ import { clearSession, getBearerToken } from "./auth/session";
  * MUST only ever run on the server — the token is not available to the browser
  * by design.
  *
- * Not yet used by any screen: the portal still reads mock fixtures via
- * `lib/data/`. This is the plumbing those functions will call once wiring
- * begins, so the auth work is complete and testable ahead of that.
+ * Inventory (`lib/data/inventory.ts`) is its first live consumer — other
+ * screens still read mock fixtures via `lib/data/` and will wire onto this
+ * the same way as they're migrated.
  */
 
 export class AdminApiError extends Error {

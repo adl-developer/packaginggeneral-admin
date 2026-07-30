@@ -2,6 +2,7 @@ import { redirect, unstable_rethrow } from "next/navigation";
 import { getInventory, type InventoryPayload } from "@/lib/data/inventory";
 import { InventoryScreen } from "@/components/inventory/inventory-screen";
 import type { RangeKey } from "@/components/layout/date-filter-bar";
+import { presetRange } from "@/lib/date-range-math";
 
 /** Live Medusa data — never cache. */
 export const dynamic = "force-dynamic";
@@ -17,30 +18,19 @@ function str(v: string | string[] | undefined): string | undefined {
   return typeof v === "string" ? v : undefined;
 }
 
-const PRESET_KEYS_DAYS: Record<PresetKey, number> = {
-  "7d": 7,
-  "30d": 30,
-  "60d": 60,
-  "90d": 90,
-};
-
 /**
- * "N days back, inclusive of today" — the exact same formula as the client's
- * `presetRange` in lib/use-date-range.ts. NOT imported from there: that file
- * is `"use client"`, and every export of a client-directive module becomes
- * an opaque client reference once pulled into a Server Component — a plain
- * exported function stops being callable server-side. Duplicating three
- * lines of date arithmetic here is cheaper and safer than restructuring an
- * already-reviewed client module just to share it.
+ * Default "Last 30d" scope, expressed as URL params. Shares its date
+ * arithmetic with the client's `presetRange` (`@/lib/date-range-math` —
+ * directive-free, so it's safely importable from this Server Component;
+ * `use-date-range.ts` re-exports the same function for client call sites).
+ * Duplicating this used to be necessary before that extraction; now both
+ * sides call the identical formula, so they can't drift apart.
  */
 function defaultRangeParams(): URLSearchParams {
-  const today = new Date();
-  const from = new Date(today);
-  from.setDate(today.getDate() - (PRESET_KEYS_DAYS["30d"] - 1));
-  const iso = (d: Date) => d.toISOString().slice(0, 10);
+  const { from, to } = presetRange("30d");
   const qs = new URLSearchParams();
-  qs.set("start", iso(from));
-  qs.set("end", iso(today));
+  qs.set("start", from);
+  qs.set("end", to);
   qs.set("range", "30d");
   return qs;
 }

@@ -2,27 +2,12 @@
 
 import * as React from "react";
 import type { RangeKey } from "@/components/layout/date-filter-bar";
+import { RANGE_DAYS, presetRange } from "@/lib/date-range-math";
 
-export const RANGE_DAYS: Record<Exclude<RangeKey, null>, number> = {
-  "7d": 7,
-  "30d": 30,
-  "60d": 60,
-  "90d": 90,
-};
-
-const iso = (d: Date) => d.toISOString().slice(0, 10);
-
-/**
- * Start/end dates for a preset, counting back from today, INCLUSIVE of today.
- * Anchored to the real clock because these dates are written into the visible
- * inputs — a window that didn't end today would read as wrong.
- */
-export function presetRange(key: Exclude<RangeKey, null>) {
-  const today = new Date();
-  const from = new Date(today);
-  from.setDate(today.getDate() - (RANGE_DAYS[key] - 1));
-  return { from: iso(from), to: iso(today) };
-}
+// Re-exported so existing importers of this module keep working unchanged —
+// the actual arithmetic now lives in date-range-math.ts (directive-free, so
+// Server Components can import it too; see that file's doc comment).
+export { RANGE_DAYS, presetRange };
 
 /**
  * Literal seed for the hook's initial state: the EXACT window already in
