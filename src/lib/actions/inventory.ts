@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { unstable_rethrow } from "next/navigation";
 import { AdminApiError, adminFetch } from "@/lib/medusa-admin";
 
 /**
@@ -25,6 +26,12 @@ async function run(
     revalidatePath("/inventory");
     return { ok: true };
   } catch (err) {
+    // adminFetch calls redirect("/login") when the session cookie is missing
+    // or the backend returns 401 (see medusa-admin.ts). redirect() works by
+    // THROWING a special Next.js control-flow error — rethrow it here before
+    // any other handling, or the bounce-to-login never happens and the
+    // operator is told "backend unreachable" when their session just died.
+    unstable_rethrow(err);
     if (err instanceof AdminApiError) {
       // The backend's message is written for an operator — surface it rather
       // than replacing it with something vaguer.
