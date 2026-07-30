@@ -1,8 +1,9 @@
 "use client";
 
 import * as React from "react";
+import { useRouter } from "next/navigation";
 import { Bell, Boxes, Package, Search } from "lucide-react";
-import { DateFilterBar } from "@/components/layout/date-filter-bar";
+import { DateFilterBar, type RangeKey } from "@/components/layout/date-filter-bar";
 import { InventoryTable } from "@/components/inventory/inventory-table";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input, Select } from "@/components/ui/input";
@@ -94,6 +95,21 @@ function StatCard({
 }
 
 /**
+ * What the server actually used for THIS payload: the fetched
+ * `ordered_in_range` figures and the "Ordered in range"/"Ordered (all time)"
+ * label both derive from this, never from the date bar's own live client
+ * state — that's what keeps the label from ever describing a window the
+ * data wasn't actually scoped to (see page.tsx's URL-is-the-source-of-truth
+ * comment).
+ */
+export type InitialInventoryRange = {
+  start: string;
+  end: string;
+  range: RangeKey;
+  active: boolean;
+};
+
+/**
  * Inventory — Figma 3992:2915. No mobile frame exists for this screen (all 36
  * mobile-admin frames were checked); the shared Table component's own
  * `overflow-x-auto` wrapper is how narrow viewports are handled here, same as
@@ -103,9 +119,32 @@ function StatCard({
  * this screen starts directly with the filter bar, matching the Overview
  * screen's structure (KPI cards, no second heading).
  */
-export function InventoryScreen({ payload }: { payload: InventoryPayload }) {
-  // Default Last 30d, matching the active chip in the Figma frame.
-  const range = useDateRange("30d");
+export function InventoryScreen({
+  payload,
+  initialRange,
+}: {
+  payload: InventoryPayload;
+  initialRange: InitialInventoryRange;
+}) {
+  const router = useRouter();
+  const [isPending, startTransition] = React.useTransition();
+
+  // Seeds the date bar's own interactive state from whatever preset the URL
+  // resolved to. Only a known preset key re-derives itself correctly here
+  // (useDateRange recomputes "N days back from now" itself); a hand-typed
+  // custom range surviving a hard refresh will show blank inputs for one
+  // paint even though the fetch below is still correctly scoped — the
+  // fetched numbers and the header label never depend on this hook's state,
+  // only on `initialRange` (server-resolved), so that gap is cosmetic only.
+  const seedKey =
+    initialRange.range === "7d" ||
+    initialRange.range === "30d" ||
+    initialRange.range === "60d" ||
+    initialRange.range === "90d"
+      ? initialRange.range
+      : undefined;
+  const range = useDateRange(seedKey);
+
   const [search, setSearch] = React.useState("");
   const [category, setCategory] = React.useState("all");
   const [stockLevel, setStockLevel] = React.useState<StockLevelFilter>("all");
@@ -124,10 +163,42 @@ export function InventoryScreen({ payload }: { payload: InventoryPayload }) {
     [payload.products, search, category, stockLevel, alert],
   );
 
-  const rangeActive = Boolean(range.start || range.end);
+  // Skip the very first effect run: the server already fetched exactly what
+  // the URL says, so re-issuing that same navigation would be a wasted round
+  // trip. Every REAL change after that — a preset click or a hand-edited
+  // date — pushes the new window into the URL, which re-runs the server
+  // component and refetches `getInventory` scoped to it. This is a
+  // navigation (an external system), not local setState, so it belongs in an
+  // effect rather than during render.
+  const mounted = React.useRef(false);
+  React.useEffect(() => {
+    if (!mounted.current) {
+      mounted.current = true;
+      return;
+    }
+    const qs = new URLSearchParams();
+    if (range.range) {
+      // A preset chip: carry both the resolved dates and which chip it was.
+      qs.set("start", range.start);
+      qs.set("end", range.end);
+      qs.set("range", range.range);
+    } else if (range.start || range.end) {
+      // A hand-edited date with no matching chip.
+      if (range.start) qs.set("start", range.start);
+      if (range.end) qs.set("end", range.end);
+    } else {
+      // Explicitly cleared — genuinely all-time, not "unspecified" (an empty
+      // URL means "never chosen yet" server-side and would redirect back to
+      // Last 30d, undoing the clear).
+      qs.set("range", "all");
+    }
+    startTransition(() => {
+      router.replace(`/inventory?${qs.toString()}`, { scroll: false });
+    });
+  }, [range.start, range.end, range.range, router]);
 
   return (
-    <div>
+    <div className={isPending ? "opacity-60 transition-opacity" : "transition-opacity"}>
       <DateFilterBar
         start={range.start}
         end={range.end}
@@ -218,7 +289,7 @@ export function InventoryScreen({ payload }: { payload: InventoryPayload }) {
         </Select>
       </div>
 
-      <InventoryTable products={visible} rangeActive={rangeActive} />
+      <InventoryTable products={visible} rangeActive={initialRange.active} />
 
       <p className="mt-4 text-center text-xs text-muted">
         Available = Total Stock − Orders Used − Reserved · Stock alert fires at

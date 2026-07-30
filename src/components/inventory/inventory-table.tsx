@@ -9,6 +9,7 @@ import {
   StockDialogs,
   type DialogRequest,
 } from "@/components/inventory/stock-dialogs";
+import { ALERT_TEXT_CLASS } from "@/components/inventory/constants";
 import type { ProductRow, VariantRow } from "@/lib/data/inventory";
 
 const nf = new Intl.NumberFormat("en-GH");
@@ -37,7 +38,7 @@ function AlertCell({
   return (
     <span
       className={`inline-flex flex-col items-center gap-0.5 ${
-        inAlert ? "text-[#964022]" : "text-muted"
+        inAlert ? ALERT_TEXT_CLASS : "text-muted"
       }`}
     >
       <Bell className="size-4" aria-hidden />

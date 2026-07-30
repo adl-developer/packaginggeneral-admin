@@ -12,6 +12,7 @@ import {
   setProductThreshold,
   setVariantThreshold,
 } from "@/lib/actions/inventory";
+import { ALERT_TEXT_CLASS } from "@/components/inventory/constants";
 import type { StaffReservation } from "@/lib/data/inventory";
 
 export type DialogRequest =
@@ -203,7 +204,7 @@ function StockDialog({
             {nf.format(request.available)} available.
           </p>
           {overCommits && (
-            <p className="text-xs text-[#964022]">
+            <p className={`text-xs ${ALERT_TEXT_CLASS}`}>
               This is more than is available. Allowed — stock figures here are
               advisory and never block a sale — but the shortfall is real.
             </p>
