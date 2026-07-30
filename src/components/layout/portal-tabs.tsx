@@ -39,6 +39,11 @@ const TABS: { href: string; label: string; roles: TeamRole[] }[] = [
   },
   { href: "/promotions", label: "Promotions", roles: ["super-admin", "admin"] },
   { href: "/users", label: "Users", roles: ["super-admin"] },
+  {
+    href: "/inventory",
+    label: "Inventory",
+    roles: ["super-admin", "admin"],
+  },
   { href: "/settings", label: "Settings", roles: ["super-admin", "admin"] },
 ];
 
