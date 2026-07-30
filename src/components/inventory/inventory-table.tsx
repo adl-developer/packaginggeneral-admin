@@ -82,7 +82,10 @@ export function InventoryTable({
             </p>
           ) : (
             <Table>
-              <THead>
+              {/* Figma 3992:2915 (design-reference/admin/specs-inventory.txt):
+                  "Table Row 1198x41 bg=196,188,176@0.3" — tinted like
+                  Customers/Users, not plain like Orders. */}
+              <THead tinted>
                 <TR>
                   <TH>Product</TH>
                   <TH className="text-center">Total Stock</TH>

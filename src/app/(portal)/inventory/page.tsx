@@ -108,7 +108,12 @@ export default async function InventoryPage({
   const start = isAllTime ? undefined : rawStart;
   const end = isAllTime ? undefined : rawEnd;
   const rangeActive = !isAllTime && Boolean(start || end);
-  const presetKey = isPresetKey(rawRange) ? rawRange : null;
+  // Only light up a preset chip when the range it names is actually the one
+  // in effect — a hand-crafted `?range=30d` with no start/end is genuinely
+  // all-time data (no date filter reaches getInventory below), so the chip
+  // must NOT claim "30d" over it; that would be the same displayed-vs-actual
+  // mismatch this whole rewrite exists to prevent, just relocated to the chip.
+  const presetKey = rangeActive && isPresetKey(rawRange) ? rawRange : null;
 
   const result = await loadInventory(start, end);
 

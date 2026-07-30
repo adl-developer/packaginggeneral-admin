@@ -205,8 +205,11 @@ function StockDialog({
           </p>
           {overCommits && (
             <p className={`text-xs ${ALERT_TEXT_CLASS}`}>
-              This is more than is available. Allowed — stock figures here are
-              advisory and never block a sale — but the shortfall is real.
+              This is more than is available. Reserving it is still allowed —
+              a manufacturer can legitimately commit units still in
+              production — but the held units leave the online sellable
+              pool immediately. Driving available to zero will stop
+              customers from buying this product online.
             </p>
           )}
 

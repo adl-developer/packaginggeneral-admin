@@ -129,21 +129,20 @@ export function InventoryScreen({
   const router = useRouter();
   const [isPending, startTransition] = React.useTransition();
 
-  // Seeds the date bar's own interactive state from whatever preset the URL
-  // resolved to. Only a known preset key re-derives itself correctly here
-  // (useDateRange recomputes "N days back from now" itself); a hand-typed
-  // custom range surviving a hard refresh will show blank inputs for one
-  // paint even though the fetch below is still correctly scoped — the
-  // fetched numbers and the header label never depend on this hook's state,
-  // only on `initialRange` (server-resolved), so that gap is cosmetic only.
-  const seedKey =
-    initialRange.range === "7d" ||
-    initialRange.range === "30d" ||
-    initialRange.range === "60d" ||
-    initialRange.range === "90d"
-      ? initialRange.range
-      : undefined;
-  const range = useDateRange(seedKey);
+  // Seeds the date bar's own interactive state from the EXACT window the
+  // server just fetched — not a preset key the hook would have to re-derive
+  // from "now". Re-deriving would drift on a reopened tab, a bookmark, a
+  // shared link, or just a refresh after midnight: the fetch and label would
+  // still describe the original window, but the two date inputs would show
+  // a freshly-computed one, indefinitely, until someone touched the bar.
+  // Passing the literal `initialRange` values instead means the inputs can
+  // never disagree with what's actually on screen. The `range` key still
+  // drives which preset chip lights up.
+  const range = useDateRange({
+    start: initialRange.start,
+    end: initialRange.end,
+    range: initialRange.range,
+  });
 
   const [search, setSearch] = React.useState("");
   const [category, setCategory] = React.useState("all");
