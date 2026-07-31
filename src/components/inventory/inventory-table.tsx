@@ -14,6 +14,13 @@ import type { ProductRow, VariantRow } from "@/lib/data/inventory";
 
 const nf = new Intl.NumberFormat("en-GH");
 
+/** Marks an "Ordered" figure as a floor rather than a complete total when
+ *  the backend's order scan hit its cap (aggregate.ts's `stats.sampled`) —
+ *  see the footnote this pairs with in inventory-screen.tsx. */
+function fmtOrdered(n: number, sampled: boolean): string {
+  return sampled ? `${nf.format(n)}+` : nf.format(n);
+}
+
 /** Bell + "at N", or a muted "—" when no threshold is set. */
 function AlertCell({
   threshold,
@@ -59,9 +66,13 @@ function AlertCell({
 export function InventoryTable({
   products,
   rangeActive,
+  sampled,
 }: {
   products: ProductRow[];
   rangeActive: boolean;
+  /** True when the "Ordered" figures below are a floor, not a complete
+   *  total — the backend's order scan for this window hit its cap. */
+  sampled: boolean;
 }) {
   const [expanded, setExpanded] = React.useState<Set<string>>(new Set());
   const [request, setRequest] = React.useState<DialogRequest | null>(null);
@@ -99,7 +110,14 @@ export function InventoryTable({
                   <TH>Product</TH>
                   <TH className="text-center">Total Stock</TH>
                   <TH className="text-center">Orders Used</TH>
-                  <TH className="text-center">
+                  <TH
+                    className="text-center"
+                    title={
+                      sampled
+                        ? "Over 1,000 orders matched this window — figures marked \"+\" only count the most recently scanned ones."
+                        : undefined
+                    }
+                  >
                     {rangeActive ? "Ordered in range" : "Ordered (all time)"}
                   </TH>
                   <TH className="text-center">Reserved</TH>
@@ -137,7 +155,9 @@ export function InventoryTable({
                         </TD>
                         <TD className="text-center tabular-nums">{nf.format(p.total_stock)}</TD>
                         <TD className="text-center tabular-nums">{nf.format(p.orders_used)}</TD>
-                        <TD className="text-center tabular-nums">{nf.format(p.ordered_in_range)}</TD>
+                        <TD className="text-center tabular-nums">
+                          {fmtOrdered(p.ordered_in_range, sampled)}
+                        </TD>
                         <TD className="text-center tabular-nums">{nf.format(p.reserved)}</TD>
                         <TD className="text-center font-medium tabular-nums">
                           {nf.format(p.available)}
@@ -189,7 +209,7 @@ export function InventoryTable({
                             <TD className="text-center tabular-nums">{nf.format(v.total_stock)}</TD>
                             <TD className="text-center tabular-nums">{nf.format(v.orders_used)}</TD>
                             <TD className="text-center tabular-nums">
-                              {nf.format(v.ordered_in_range)}
+                              {fmtOrdered(v.ordered_in_range, sampled)}
                             </TD>
                             <TD className="text-center tabular-nums">{nf.format(v.reserved)}</TD>
                             <TD className="text-center font-medium tabular-nums">

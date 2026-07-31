@@ -288,12 +288,26 @@ export function InventoryScreen({
         </Select>
       </div>
 
-      <InventoryTable products={visible} rangeActive={initialRange.active} />
+      <InventoryTable
+        products={visible}
+        rangeActive={initialRange.active}
+        sampled={payload.stats.sampled === true}
+      />
 
       <p className="mt-4 text-center text-xs text-muted">
         Available = Total Stock − Orders Used − Reserved · Stock alert fires at
         or below the threshold you set
       </p>
+      {payload.stats.sampled && (
+        // Edge case, not an error state — the order scan behind "Ordered"
+        // hit its cap (ORDER_SCAN_CAP in the backend aggregate), so those
+        // figures are a floor, not a complete total. Kept as a footnote,
+        // same register as the line above, rather than anything alarming.
+        <p className="mt-1 text-center text-xs text-muted">
+          Figures marked &quot;+&quot; reflect only the most recently scanned
+          orders in this window — the true total may be higher.
+        </p>
+      )}
     </div>
   );
 }

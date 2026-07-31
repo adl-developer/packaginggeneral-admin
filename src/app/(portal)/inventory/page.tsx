@@ -1,5 +1,6 @@
 import { redirect, unstable_rethrow } from "next/navigation";
 import { getInventory, type InventoryPayload } from "@/lib/data/inventory";
+import { AdminApiError } from "@/lib/medusa-admin";
 import { InventoryScreen } from "@/components/inventory/inventory-screen";
 import type { RangeKey } from "@/components/layout/date-filter-bar";
 import { presetRange } from "@/lib/date-range-math";
@@ -45,7 +46,10 @@ function defaultRangeParams(): URLSearchParams {
 async function loadInventory(
   start: string | undefined,
   end: string | undefined,
-): Promise<{ ok: true; payload: InventoryPayload } | { ok: false }> {
+): Promise<
+  | { ok: true; payload: InventoryPayload }
+  | { ok: false; reason: "invalid-range" | "unreachable" }
+> {
   try {
     const payload = await getInventory(start, end);
     return { ok: true, payload };
@@ -57,7 +61,16 @@ async function loadInventory(
     // it here would tell an operator "backend unreachable" when their
     // session just died.
     unstable_rethrow(err);
-    return { ok: false };
+    // A 400 means the backend rejected THIS request's own start/end query
+    // params (GET /admin/pg/inventory's isIsoDate check — a hand-edited URL
+    // like ?start=notadate) — that's the operator's own typo, not an outage.
+    // Everything else (5xx, timeouts, DNS/connection failures) is a real
+    // "can't reach the backend" and must keep the existing wording.
+    const reason =
+      err instanceof AdminApiError && err.status === 400
+        ? "invalid-range"
+        : "unreachable";
+    return { ok: false, reason };
   }
 }
 
@@ -109,7 +122,27 @@ export default async function InventoryPage({
 
   if (!result.ok) {
     // An inventory screen that renders zeros on failure would read as "no
-    // stock" — the most dangerous possible lie here. Fail visibly instead.
+    // stock" — the most dangerous possible lie here. Fail visibly instead,
+    // but with copy matched to the actual cause: a bad URL is the operator's
+    // own typo, not an outage, and telling them the backend is down sends
+    // them hunting for a problem that doesn't exist.
+    if (result.reason === "invalid-range") {
+      return (
+        <div className="rounded-panel border border-line bg-surface p-8 text-center">
+          <p className="text-base font-semibold text-brand">
+            Invalid date range
+          </p>
+          <p className="mt-1 text-sm text-muted">
+            The start/end dates in this link aren&apos;t valid — the backend
+            is reachable, this URL just isn&apos;t.{" "}
+            <a href="/inventory" className="underline">
+              Go back to the default range
+            </a>{" "}
+            or fix the dates in the filter bar above.
+          </p>
+        </div>
+      );
+    }
     return (
       <div className="rounded-panel border border-line bg-surface p-8 text-center">
         <p className="text-base font-semibold text-brand">

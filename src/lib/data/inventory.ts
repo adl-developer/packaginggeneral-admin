@@ -54,6 +54,11 @@ export type InventoryPayload = {
     total_stock: number;
     units_reserved: number;
     stock_alerts: number;
+    /** True when the backend's order scan behind "Ordered in range" hit its
+     *  cap (`ORDER_SCAN_CAP` in aggregate.ts) — the ordered figures may be an
+     *  undercount, not a wrong-but-complete total. Optional so this still
+     *  typechecks against an older backend response that never sends it. */
+    sampled?: boolean;
   };
 };
 
