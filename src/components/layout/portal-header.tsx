@@ -1,14 +1,14 @@
 "use client";
 
 import { AdminHeader } from "./admin-header";
-import { useAdmin } from "@/lib/store";
+import { useSession } from "@/lib/session-context";
 
-/** Feeds the signed-in user from the store into the presentational header. */
+/** Feeds the signed-in user from the session into the presentational header. */
 export function PortalHeader() {
-  const { currentUser } = useAdmin();
+  const currentUser = useSession();
   return (
     <AdminHeader
-      user={{ name: currentUser.name, email: currentUser.email }}
+      user={{ name: currentUser.name, email: currentUser.email ?? "" }}
     />
   );
 }

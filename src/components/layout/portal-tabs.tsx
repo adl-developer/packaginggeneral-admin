@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useAdmin } from "@/lib/store";
+import { useSession } from "@/lib/session-context";
 import { cn } from "@/lib/utils";
 import type { TeamRole } from "@/lib/data/types";
 
@@ -49,7 +49,7 @@ const TABS: { href: string; label: string; roles: TeamRole[] }[] = [
 
 export function PortalTabs() {
   const pathname = usePathname();
-  const { currentUser } = useAdmin();
+  const currentUser = useSession();
   const visible = TABS.filter((t) => t.roles.includes(currentUser.role));
 
   return (
