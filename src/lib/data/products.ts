@@ -17,6 +17,17 @@ import { adminFetch } from "@/lib/medusa-admin";
  *     — the client's sheets arrived without real pricing. This flag MUST
  *     ride along so the UI never presents a placeholder figure as final.
  *
+ * ⚠ SCOPED TO PUBLISHED PRODUCTS, deliberately. `GET /admin/pg/dashboard`
+ * counts `filters: { status: "published" }` for its "Active Products" stat;
+ * this call previously had no status filter at all, so drafts counted here
+ * and not there and the two screens would state different catalog sizes with
+ * nothing on either explaining the gap. Published is the side that was made
+ * to match, not the other way round: this portal has no draft workflow (the
+ * ProductCreator is deliberately disabled — see product-creator.tsx), so a
+ * draft row would be a product staff can neither act on nor account for.
+ * If drafts ever become actionable here, label the count on BOTH screens
+ * rather than silently widening one.
+ *
  * No mock path: a catalog screen showing invented numbers is worse than one
  * showing an error, because staff act on it.
  */
@@ -68,6 +79,7 @@ export type ProductRow = {
 
 export type ProductsPayload = {
   products: ProductRow[];
+  /** PUBLISHED products only — same scope as the Overview stat card. */
   count: number;
   /** True when the catalog has more products than this page fetched
    *  (`limit=100`) — the current catalog is ~11 products, so this should
@@ -94,8 +106,11 @@ function toProductRow(p: MedusaProduct): ProductRow {
 }
 
 export async function getProducts(): Promise<ProductsPayload> {
+  // `status` is an ARRAY param on Medusa's admin product list validator
+  // (`AdminGetProductsParams.status: z.array(ProductStatus)`), hence the
+  // `status[]=` form — a bare `status=published` is rejected.
   const res = await adminFetch<MedusaProductListResponse>(
-    "/admin/products?limit=100&fields=id,title,thumbnail,metadata,*categories,*variants",
+    "/admin/products?limit=100&status[]=published&fields=id,title,thumbnail,metadata,*categories,*variants",
   );
 
   return {

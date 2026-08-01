@@ -43,8 +43,11 @@ export function SettingsScreen({
                 Product Management
               </h2>
               <p className="text-sm leading-5 text-muted">
+                {/* "Published" said out loud so this can't silently disagree
+                    with Overview's Active Products card, which counts the
+                    same scope (see lib/data/products.ts). */}
                 {productsResult.ok
-                  ? `${productsResult.payload.count} product${
+                  ? `${productsResult.payload.count} published product${
                       productsResult.payload.count === 1 ? "" : "s"
                     } in the catalog`
                   : "Manage your product catalog"}
