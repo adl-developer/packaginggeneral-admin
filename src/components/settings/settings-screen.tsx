@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input, Label, Select } from "@/components/ui/input";
 import type { ProductsPayload } from "@/lib/data/products";
 import type { PlatformSettings } from "@/lib/data/types";
+import { NOT_CONNECTED_MESSAGE } from "@/lib/not-connected";
 import { formatCedis } from "@/lib/utils";
 
 /**
@@ -154,8 +155,6 @@ export function SettingsScreen({
     </>
   );
 }
-
-const NOT_CONNECTED_MESSAGE = "Not yet connected — changes are not saved.";
 
 function PlatformSettingsCard({ settings }: { settings: PlatformSettings }) {
   const [draft, setDraft] = React.useState(settings);

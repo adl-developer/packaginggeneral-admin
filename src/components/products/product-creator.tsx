@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { PRODUCT_CATEGORIES } from "@/lib/data/mock";
+import { NOT_CONNECTED_MESSAGE } from "@/lib/not-connected";
 import type {
   MaterialOption,
   MoqTier,
@@ -31,7 +32,6 @@ import type {
  * disabled and labelled, so a manager filling this form out cannot come away
  * believing a product was created.
  */
-const NOT_CONNECTED_MESSAGE = "Not yet connected — changes are not saved.";
 const uid = (prefix: string) =>
   `${prefix}_${Math.random().toString(36).slice(2, 9)}`;
 

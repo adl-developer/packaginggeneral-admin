@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import type { CampaignBudgetType, PromoCode } from "@/lib/data/types";
+import { NOT_CONNECTED_MESSAGE } from "@/lib/not-connected";
 import { cn } from "@/lib/utils";
 
 /**
@@ -13,18 +14,21 @@ import { cn } from "@/lib/utils";
  * This is Medusa's **Campaign** form: name, campaign_identifier, description,
  * starts_at/ends_at, and a budget of type usage|spend with a limit. See the
  * mapping table on `PromoCode` in lib/data/types.ts.
+ *
+ * ⚠ There is no `onSave`. Real Medusa promotions are Spec 2, so the submit
+ * control is genuinely `disabled` and labelled rather than writing to
+ * session-only state that vanishes on reload — same treatment as the
+ * ProductCreator. Wire the real mutation here when the spec lands.
  */
 
 export function PromotionDialog({
   promo,
   open,
   onClose,
-  onSave,
 }: {
   promo: PromoCode | null;
   open: boolean;
   onClose: () => void;
-  onSave: (promo: PromoCode) => void;
 }) {
   const editing = Boolean(promo);
 
@@ -42,30 +46,6 @@ export function PromotionDialog({
   const [perCustomer, setPerCustomer] = React.useState(
     promo?.limitPerCustomer === null ? "0" : String(promo?.limitPerCustomer ?? 1),
   );
-  const [touched, setTouched] = React.useState(false);
-
-  const invalid = !name.trim() || !code.trim() || !limit || Number(limit) <= 0;
-
-  const submit = () => {
-    setTouched(true);
-    if (invalid) return;
-    onSave({
-      id: promo?.id ?? `promo_${Date.now()}`,
-      code: code.trim().toUpperCase(),
-      name: name.trim(),
-      description: description.trim(),
-      addedAt: start || new Date().toISOString().slice(0, 10),
-      used: promo?.used ?? 0,
-      limit: Number(limit),
-      expiresAt: end || "",
-      status: promo?.status ?? "active",
-      budgetType: limitType,
-      // Per-customer caps only apply to usage budgets; "0" means unlimited.
-      limitPerCustomer:
-        limitType === "usage" && perCustomer !== "0" ? Number(perCustomer) : null,
-    });
-  };
-
   return (
     <Dialog
       open={open}
@@ -76,13 +56,18 @@ export function PromotionDialog({
       }
       width={520}
       footer={
-        <div className="flex items-center justify-end gap-2">
-          <Button variant="outline" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button onClick={submit}>
-            {editing ? "Save changes" : "Create code"}
-          </Button>
+        <div className="flex flex-col gap-2">
+          <p className="text-xs leading-4 text-destructive">
+            {NOT_CONNECTED_MESSAGE} Real promotions are not built yet.
+          </p>
+          <div className="flex items-center justify-end gap-2">
+            <Button variant="outline" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button disabled title={NOT_CONNECTED_MESSAGE}>
+              {editing ? "Save changes" : "Create code"}
+            </Button>
+          </div>
         </div>
       }
     >
@@ -196,11 +181,6 @@ export function PromotionDialog({
           </Field>
         </div>
 
-        {touched && invalid && (
-          <p className="pt-3 text-xs text-destructive">
-            Name, code and a positive limit are required.
-          </p>
-        )}
       </section>
     </Dialog>
   );

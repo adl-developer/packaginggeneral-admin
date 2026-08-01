@@ -9,7 +9,8 @@ import { Switch } from "@/components/ui/switch";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { PromotionDialog } from "@/components/promotions/promotion-dialog";
 import { PROMO_BANNER, PROMO_CODES } from "@/lib/data/mock";
-import type { PromoBanner, PromoCode, PromoStatus } from "@/lib/data/types";
+import type { PromoCode, PromoStatus } from "@/lib/data/types";
+import { NOT_CONNECTED_MESSAGE } from "@/lib/not-connected";
 import { cn, formatCedis, formatDate } from "@/lib/utils";
 
 type Filter = "all" | PromoStatus;
@@ -25,31 +26,28 @@ const FILTERS: { key: Filter; label: string }[] = [
  *
  * Spec 2 (not yet built): the discount fields this screen would need don't
  * exist in the current design. This screen stays on the fixtures in
- * `lib/data/mock.ts`, held as local component state (session-only — nothing
- * here is persisted) now that the shared `AdminProvider` is gone (Task 17).
+ * `lib/data/mock.ts`.
+ *
+ * ⚠ NOTHING HERE IS PERSISTED, and it must never look as though it is. The
+ * Save Banner button used to be enabled and to show a "Saved" confirmation
+ * under copy promising the text appeared "at the top of the storefront" —
+ * a control that looks functional but changes nothing, which this codebase
+ * treats as a defect. It now mirrors Settings → Platform exactly: visible
+ * not-connected copy plus genuinely `disabled` submit controls. The fields
+ * stay editable so the preview still works; only the saves are dead, and
+ * they say so.
  */
 export default function PromotionsPage() {
-  const [banner, setBanner] = React.useState<PromoBanner>(PROMO_BANNER);
-  const saveBanner = setBanner;
-
-  const [promoCodes, setPromoCodes] = React.useState<PromoCode[]>(PROMO_CODES);
-  const upsertPromoCode = (code: PromoCode) =>
-    setPromoCodes((prev) => {
-      const exists = prev.some((c) => c.id === code.id);
-      return exists
-        ? prev.map((c) => (c.id === code.id ? code : c))
-        : [code, ...prev];
-    });
+  const banner = PROMO_BANNER;
+  const promoCodes = PROMO_CODES;
 
   const [live, setLive] = React.useState(banner.live);
   const [message, setMessage] = React.useState(banner.message);
-  const [saved, setSaved] = React.useState(false);
 
   const [filter, setFilter] = React.useState<Filter>("all");
   const [editing, setEditing] = React.useState<PromoCode | null>(null);
   const [creating, setCreating] = React.useState(false);
 
-  const dirty = live !== banner.live || message !== banner.message;
   const visible = promoCodes.filter((c) =>
     filter === "all" ? true : c.status === filter,
   );
@@ -77,10 +75,7 @@ export default function PromotionsPage() {
               </span>
               <Switch
                 checked={live}
-                onChange={(v) => {
-                  setLive(v);
-                  setSaved(false);
-                }}
+                onChange={setLive}
                 label="Banner live"
               />
             </div>
@@ -88,16 +83,20 @@ export default function PromotionsPage() {
         </CardHeader>
 
         <CardContent className="pt-6">
+          {/* Same treatment as Settings → Platform (settings-screen.tsx). */}
+          <p className="mb-4 rounded-button border border-[rgba(150,64,34,0.4)] bg-[rgba(150,64,34,0.08)] px-4 py-3 text-xs leading-4 font-medium text-brand">
+            {NOT_CONNECTED_MESSAGE} The banner below is a preview only — it has
+            no backend persistence yet, so nothing typed here reaches the
+            storefront.
+          </p>
+
           <div className="flex flex-col gap-2">
             <Label htmlFor="banner-message">Banner message</Label>
             <Textarea
               id="banner-message"
               rows={3}
               value={message}
-              onChange={(e) => {
-                setMessage(e.target.value);
-                setSaved(false);
-              }}
+              onChange={(e) => setMessage(e.target.value)}
               placeholder="e.g. Enjoy 10% off for all Easter orders Code: PGEASTER"
             />
             <p className="text-xs leading-4 text-muted">
@@ -132,18 +131,13 @@ export default function PromotionsPage() {
           </div>
 
           <div className="mt-5 flex items-center gap-3">
-            <Button
-              disabled={!dirty}
-              onClick={() => {
-                saveBanner({ live, message });
-                setSaved(true);
-              }}
-            >
+            {/* A real `disabled` attribute, not disabled-looking styling. */}
+            <Button disabled title={NOT_CONNECTED_MESSAGE}>
               Save Banner
             </Button>
-            {saved && !dirty && (
-              <span className="text-sm leading-5 text-muted">Saved</span>
-            )}
+            <span className="text-sm leading-5 text-muted">
+              {NOT_CONNECTED_MESSAGE}
+            </span>
           </div>
         </CardContent>
       </Card>
@@ -165,6 +159,15 @@ export default function PromotionsPage() {
         </CardHeader>
 
         <CardContent className="pt-6">
+          {/* The Create/Edit controls still OPEN the dialog — the form is
+              worth reviewing — but the dialog's own save is disabled, the
+              same shape as the ProductCreator. */}
+          <p className="mb-4 rounded-button border border-[rgba(150,64,34,0.4)] bg-[rgba(150,64,34,0.08)] px-4 py-3 text-xs leading-4 font-medium text-brand">
+            {NOT_CONNECTED_MESSAGE} These codes are design fixtures, not real
+            Medusa promotions — creating or editing one here changes nothing on
+            the storefront.
+          </p>
+
           {/*
             Figma: these are separate bordered chips, NOT a segmented track —
             active = brand fill + #fefdfb label; inactive = #e8e5de with a
@@ -265,11 +268,6 @@ export default function PromotionsPage() {
           promo={editing}
           open
           onClose={() => {
-            setEditing(null);
-            setCreating(false);
-          }}
-          onSave={(promo) => {
-            upsertPromoCode(promo);
             setEditing(null);
             setCreating(false);
           }}
