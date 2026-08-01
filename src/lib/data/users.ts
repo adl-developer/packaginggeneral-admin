@@ -48,3 +48,18 @@ export type UsersPayload = {
 export async function getTeam(): Promise<UsersPayload> {
   return adminFetch<UsersPayload>("/admin/pg/users");
 }
+
+/** A colleague an order can be assigned to. Only what a picker needs. */
+export type Worker = { id: string; name: string };
+
+/**
+ * The staff roster, for screens that need to OFFER a colleague rather than
+ * audit the team — currently the Orders screen's worker filter.
+ *
+ * Only accepted accounts: a pending invite has no user id yet, so it can hold
+ * no assignment and would be an option that always returns zero orders.
+ */
+export async function getWorkers(): Promise<Worker[]> {
+  const team = await getTeam();
+  return team.users.map((u) => ({ id: u.id, name: u.name }));
+}

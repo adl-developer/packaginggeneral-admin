@@ -22,6 +22,7 @@ import { Input } from "@/components/ui/input";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { addNote, claimOrder, setStage } from "@/lib/actions/orders";
 import type { OrderListRow, OrdersListPayload } from "@/lib/data/orders";
+import type { Worker } from "@/lib/data/users";
 import { NEXT_STAGE, ORDER_STATUS_CHIP, type OrderStatus } from "@/lib/data/types";
 import {
   ordersHref,
@@ -74,22 +75,21 @@ export type OrdersFilters = {
  * filter over an already-narrow, unrelated-to-date server response) or need
  * backend work outside this task's scope. Left out rather than faked.
  *
- * ⚠ The worker filter's options are derived from `payload.orders` — the
- * distinct assignees present in the CURRENT PAGE — because there is no roster
- * on this payload to derive them from. Every option shown is always a real,
- * currently fetchable worker, so nothing here is invented; but since the fetch
- * became one page rather than a 500-order scan, the list is narrower than it
- * used to be: a colleague whose orders all sit on page 4 won't appear while
- * you're on page 1. The active worker is always kept in the list so the filter
- * stays clearable. KNOWN LIMITATION — the fix is a real roster (either
- * `GET /admin/pg/users`, already live, or a `workers` array on this payload),
- * deliberately left out of the pagination change rather than bolted on.
+ * ⚠ The worker filter's options come from `workers` — the real staff roster,
+ * fetched server-side from `GET /admin/pg/users` (see orders/page.tsx). They
+ * must NOT be derived from `payload.orders`: that is one page of 20, so a
+ * colleague whose orders all sit on page 4 would be unselectable from page 1.
+ * If the roster fetch fails it arrives empty rather than taking this screen
+ * down with it, and the active worker is pinned into the list either way, so
+ * a filter set from elsewhere is always visible and clearable.
  */
 export function OrdersScreen({
   payload,
+  workers,
   filters,
 }: {
   payload: OrdersListPayload;
+  workers: Worker[];
   filters: OrdersFilters;
 }) {
   const router = useRouter();
@@ -118,26 +118,31 @@ export function OrdersScreen({
     cancelled: payload.stage_counts.cancelled,
   };
 
+  // The active worker's display name, best-effort in this order: the roster,
+  // then a row on this page that is assigned to them (covers a deactivated or
+  // otherwise unlisted account still holding orders), then the raw id. Never a
+  // guess — an id is honest, an invented name is not.
   const workerLabel =
     filters.worker === "unassigned"
       ? "Unassigned"
-      : (payload.orders.find((o) => o.assigned_to_id === filters.worker)
-          ?.assigned_to_name ?? filters.worker);
+      : (workers.find((w) => w.id === filters.worker)?.name ??
+        payload.orders.find((o) => o.assigned_to_id === filters.worker)
+          ?.assigned_to_name ??
+        filters.worker);
 
   const workerOptions = React.useMemo(() => {
     const seen = new Map<string, string>();
-    // The active worker first, so a filter set from another page can always be
-    // seen and cleared even when nobody on THIS page is assigned to them.
+    // The active worker first, so a filter that survived a roster outage — or
+    // points at someone no longer on the roster — is still visible and
+    // clearable rather than silently dropping out of the control.
     if (filters.worker && filters.worker !== "unassigned") {
       seen.set(filters.worker, workerLabel);
     }
-    for (const o of payload.orders) {
-      if (o.assigned_to_id) {
-        seen.set(o.assigned_to_id, o.assigned_to_name ?? o.assigned_to_id);
-      }
+    for (const w of workers) {
+      seen.set(w.id, w.name);
     }
     return Array.from(seen, ([id, name]) => ({ id, name }));
-  }, [payload.orders, filters.worker, workerLabel]);
+  }, [workers, filters.worker, workerLabel]);
 
   const totalPages = pageCount(payload.count, payload.limit);
   const range = showingRange(

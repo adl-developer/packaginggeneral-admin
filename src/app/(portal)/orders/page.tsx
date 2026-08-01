@@ -1,6 +1,7 @@
 import { redirect, unstable_rethrow } from "next/navigation";
 import { OrdersScreen } from "@/components/orders/orders-screen";
 import { getOrders, type OrdersListPayload } from "@/lib/data/orders";
+import { getWorkers, type Worker } from "@/lib/data/users";
 import { AdminApiError } from "@/lib/medusa-admin";
 import {
   ORDERS_PAGE_SIZE,
@@ -61,6 +62,27 @@ async function loadOrders(params: {
 }
 
 /**
+ * The staff roster behind the worker filter. Fetched here rather than derived
+ * from the page's rows, so a colleague whose orders all sit on page 4 is still
+ * selectable from page 1.
+ *
+ * Degrades to an empty roster: a roster outage must not take the Orders screen
+ * with it. The dropdown keeps "All Workers", "Unassigned" and whatever worker
+ * is already active, so an operator can always still clear a filter — and an
+ * absent name is never invented, the id shows instead.
+ */
+async function loadWorkers(): Promise<Worker[]> {
+  try {
+    return await getWorkers();
+  } catch (err) {
+    // Same rule as loadOrders: a dead session throws a Next.js redirect that
+    // must reach the framework, not be swallowed into "no colleagues found".
+    unstable_rethrow(err);
+    return [];
+  }
+}
+
+/**
  * Order Management — Server Component. The URL owns `stage`/`worker`/`q` AND
  * `page` (see `OrdersScreen`'s file comment for why): both the fetch AND the
  * rendered chip/banner/pager state derive from the SAME values read here, so
@@ -77,13 +99,18 @@ export default async function OrdersPage({
   const q = str(sp.q) ?? "";
   const page = parsePageParam(str(sp.page));
 
-  const result = await loadOrders({
-    stage: stage || undefined,
-    worker: worker || undefined,
-    q: q || undefined,
-    limit: ORDERS_PAGE_SIZE,
-    offset: offsetForPage(page, ORDERS_PAGE_SIZE),
-  });
+  // Independent reads — the roster doesn't depend on the filters, so it rides
+  // alongside rather than adding a second round trip to the page load.
+  const [result, workers] = await Promise.all([
+    loadOrders({
+      stage: stage || undefined,
+      worker: worker || undefined,
+      q: q || undefined,
+      limit: ORDERS_PAGE_SIZE,
+      offset: offsetForPage(page, ORDERS_PAGE_SIZE),
+    }),
+    loadWorkers(),
+  ]);
 
   // A bookmarked or shared link can point past the end of a result that has
   // since shrunk (or of a different filter). Redirect to the last real page
@@ -135,6 +162,7 @@ export default async function OrdersPage({
   return (
     <OrdersScreen
       payload={result.payload}
+      workers={workers}
       filters={{ stage, worker, q, page }}
     />
   );
