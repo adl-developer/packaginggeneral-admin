@@ -23,6 +23,9 @@ import { stageToStatus } from "@/lib/stage-mapping";
 import { NEXT_STAGE, ORDER_STATUS_LABEL } from "@/lib/data/types";
 import { formatCedis, formatDate } from "@/lib/utils";
 
+/** Must match `NOTE_MAX_LENGTH` in the backend notes route. */
+const NOTE_MAX_LENGTH = 2000;
+
 /**
  * View Order Detail.
  *
@@ -148,7 +151,10 @@ export function OrderDetailDialog({
             title="Payment"
             summary={
               order.payment
-                ? `${order.payment.status} · ${formatCedis(order.payment.captured)}`
+                ? // `status` is nullable on the payload — without the guard a
+                  // collapsed row could read "null · GH₵ 0.00". Matches the
+                  // `?? "—"` the expanded PaymentDetails body already uses.
+                  `${order.payment.status ?? "—"} · ${formatCedis(order.payment.captured)}`
                 : "No payment"
             }
           >
@@ -200,13 +206,23 @@ export function OrderDetailDialog({
 
           <div className="mt-5 flex flex-col gap-2 border-t border-line pt-4">
             <Label htmlFor="order-note">Add Note</Label>
+            {/* Mirrors the backend cap (`NOTE_MAX_LENGTH` in
+                api/admin/pg/orders/[id]/notes/route.ts) so a long note is
+                stopped at the keyboard instead of being rejected on submit. */}
             <Textarea
               id="order-note"
               rows={2}
+              maxLength={NOTE_MAX_LENGTH}
               value={note}
               onChange={(e) => setNote(e.target.value)}
               placeholder="Add an internal note…"
             />
+            {note.length > NOTE_MAX_LENGTH - 200 && (
+              <p className="text-xs leading-4 text-muted">
+                {(NOTE_MAX_LENGTH - note.length).toLocaleString()} characters
+                left.
+              </p>
+            )}
             <Button
               variant="outline"
               disabled={busy || !note.trim()}

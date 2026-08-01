@@ -35,9 +35,12 @@ async function loadOrders(params: {
     // propagate — swallowing it here would tell an operator "backend
     // unreachable" when their session just died.
     unstable_rethrow(err);
-    // A 400 means the backend rejected THIS request's own stage/worker/q
-    // query params — the operator's own typo (a hand-edited URL), not an
-    // outage. Everything else (5xx, timeouts, DNS/connection failures) is a
+    // A 400 means the backend rejected THIS request's own query params — the
+    // operator's own typo (a hand-edited URL), not an outage. Concretely that
+    // is an unrecognised `?stage=`, which `orders-ops/route.ts` now validates
+    // and rejects rather than silently ignoring (it used to return the FULL
+    // list under a filtered-looking UI, which also made this branch dead
+    // code). Everything else (5xx, timeouts, DNS/connection failures) is a
     // real "can't reach the backend" and must keep the existing wording.
     const reason =
       err instanceof AdminApiError && err.status === 400
@@ -79,8 +82,8 @@ export default async function OrdersPage({
         <div className="rounded-panel border border-line bg-surface p-8 text-center">
           <p className="text-base font-semibold text-brand">Invalid filter</p>
           <p className="mt-1 text-sm text-muted">
-            The stage/worker/search values in this link aren&apos;t valid —
-            the backend is reachable, this URL just isn&apos;t.{" "}
+            The status filter in this link isn&apos;t one the backend
+            recognises — the backend is reachable, this URL just isn&apos;t.{" "}
             <a href="/orders" className="underline">
               Go back to all orders
             </a>{" "}

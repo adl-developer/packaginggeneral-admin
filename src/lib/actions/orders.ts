@@ -32,10 +32,33 @@ export async function claimOrder(orderId: string): Promise<ActionResult> {
   return run(`/admin/pg/orders/${orderId}/claim`, "POST", "/orders");
 }
 
+/**
+ * ⚠ `"cancelled"` is refused here.
+ *
+ * Cancelling reaches Medusa's `cancelOrderWorkflow`, which refunds every
+ * captured payment — the exact money path `backend/src/api/admin/pg/orders/
+ * [id]/cancel/route.ts` is parked behind `PG_ENABLE_ORDER_REFUNDS`. The
+ * portal deliberately offers no cancel transition while that is parked
+ * (`NEXT_STAGE` never yields "cancelled" and `onRequestCancel` is unwired),
+ * but a server action's id ships in the `/orders` client bundle and can be
+ * invoked directly, so refusing here as well costs nothing.
+ *
+ * This is CONVENIENCE, NOT ACCESS CONTROL — the real boundary is the backend,
+ * which now role-gates the cancel stage and blocks it outright on an order
+ * with a captured payment. Remove this branch when the cancel flow is
+ * genuinely wired (Task 11/12), not before.
+ */
 export async function setStage(
   orderId: string,
   stage: OrderStage,
 ): Promise<ActionResult> {
+  if (stage === "cancelled") {
+    return {
+      ok: false,
+      error:
+        "Cancelling an order isn't available in the portal yet — cancel it from the Medusa admin instead.",
+    };
+  }
   return run(`/admin/pg/orders/${orderId}/stage`, "POST", "/orders", {
     stage,
   });
