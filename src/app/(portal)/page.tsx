@@ -13,17 +13,23 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { statusCounts, summarize } from "@/lib/data";
-import { TOTAL_ORDERS_ALL_TIME } from "@/lib/data/mock";
-import { useAdmin } from "@/lib/store";
+import { ORDERS, TOTAL_ORDERS_ALL_TIME } from "@/lib/data/mock";
 import { useDateFilter } from "@/lib/use-date-filter";
 import { cn, formatCedis } from "@/lib/utils";
 
 /**
  * Overview — Figma 3814:5507.
  * Four 288×172 stat cards on a 16px gap, then the 1200×498 Recent Orders card.
+ *
+ * ⚠ STILL MOCK DATA (`ORDERS`), not the store. Task 9 removed the orders
+ * slice from `lib/store.tsx` (orders now live in `lib/actions/orders.ts` +
+ * `orders/page.tsx`'s server fetch) — this screen isn't in that task's scope,
+ * so it was pointed straight at the same fixture it already showed rather
+ * than left broken. Task 13 ("Admin Overview wired") replaces this with a
+ * live fetch; don't build further mock features on top of it meanwhile.
  */
 export default function OverviewPage() {
-  const { orders } = useAdmin();
+  const orders = ORDERS;
   const {
     start,
     end,

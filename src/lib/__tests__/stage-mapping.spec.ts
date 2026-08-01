@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { stageToStatus, statusToStage } from "@/lib/stage-mapping";
+import { isOrderStage, stageToStatus, statusToStage } from "@/lib/stage-mapping";
 
 describe("stageToStatus", () => {
   it("maps every backend stage to a portal status", () => {
@@ -26,5 +26,25 @@ describe("statusToStage", () => {
     ] as const) {
       expect(stageToStatus(statusToStage(s))).toBe(s);
     }
+  });
+});
+
+describe("isOrderStage", () => {
+  it("accepts every real backend stage", () => {
+    for (const stage of [
+      "new",
+      "in_progress",
+      "ready_for_delivery",
+      "delivered",
+      "cancelled",
+    ]) {
+      expect(isOrderStage(stage)).toBe(true);
+    }
+  });
+
+  it("rejects a portal status, an empty string, and garbage", () => {
+    expect(isOrderStage("in-progress")).toBe(false);
+    expect(isOrderStage("")).toBe(false);
+    expect(isOrderStage("nonsense")).toBe(false);
   });
 });

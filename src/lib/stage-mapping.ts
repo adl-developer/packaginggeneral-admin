@@ -37,3 +37,10 @@ export function stageToStatus(stage: string): OrderStatus {
 export function statusToStage(status: OrderStatus): OrderStage {
   return TO_STAGE[status];
 }
+
+/** All valid backend stage values, e.g. for validating a hand-edited `?stage=` URL param. */
+export const ORDER_STAGE_VALUES = Object.keys(TO_STATUS) as OrderStage[];
+
+export function isOrderStage(value: string): value is OrderStage {
+  return (ORDER_STAGE_VALUES as string[]).includes(value);
+}

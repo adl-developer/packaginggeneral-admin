@@ -16,12 +16,11 @@ import { StatusBadge } from "@/components/orders/status-badge";
 import { Button } from "@/components/ui/button";
 import { Collapsible } from "@/components/ui/collapsible";
 import { Dialog } from "@/components/ui/dialog";
-import { Label, Select, Textarea } from "@/components/ui/input";
+import { Label, Textarea } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { OrderDetail } from "@/lib/data/orders";
 import { stageToStatus } from "@/lib/stage-mapping";
 import { NEXT_STAGE, ORDER_STATUS_LABEL } from "@/lib/data/types";
-import type { TeamMember } from "@/lib/data/types";
 import { formatCedis, formatDate } from "@/lib/utils";
 
 /**
@@ -41,28 +40,40 @@ import { formatCedis, formatDate } from "@/lib/utils";
  * The endpoint this reads from (`GET /admin/pg/orders/:id`) deliberately
  * excludes the payer's mobile-money number, card authorization and IP
  * address. Nothing in this file should reconstruct or display them.
+ *
+ * ⚠ No `team` prop / arbitrary "assign to any worker" control. The only
+ * backend assignment endpoint (`POST .../claim`) is self-assignment — it
+ * always assigns the CALLING admin, never a chosen target user (see
+ * `lib/actions/orders.ts`'s comment on the omitted `assignWorker`). The
+ * assignee name below comes straight off `order.assignment`, which already
+ * carries it — no lookup against the (mock, not-yet-live) team list needed.
+ *
+ * `onRequestCancel` is optional: cancellation isn't wired yet (Task 11/12),
+ * so the caller simply doesn't pass it and the button doesn't render, rather
+ * than wiring up a Cancel button that does nothing.
  */
 export function OrderDetailDialog({
   order,
-  team,
   open,
   onClose,
-  onAssign,
+  onClaim,
   onAdvance,
   onAddNote,
   onRequestCancel,
+  busy = false,
 }: {
   order: OrderDetail;
-  team: TeamMember[];
   open: boolean;
   onClose: () => void;
-  onAssign: (memberId: string) => void;
+  onClaim: () => void;
   onAdvance: () => void;
   onAddNote: (note: string) => void;
-  onRequestCancel: () => void;
+  onRequestCancel?: () => void;
+  /** True while a mutation triggered from this dialog is in flight — disables
+   *  the action buttons so a second click can't fire the same mutation twice. */
+  busy?: boolean;
 }) {
   const [note, setNote] = React.useState("");
-  const assignee = team.find((m) => m.id === order.assignment.assigned_to_id);
   // stageToStatus, never inline string replacement — the backend's
   // `ORDER_STAGES` and the portal's `OrderStatus` are spelled differently.
   const status = stageToStatus(order.stage);
@@ -108,9 +119,9 @@ export function OrderDetailDialog({
             <h3 className="pb-2 text-sm font-medium leading-5 text-brand">
               Assignment
             </h3>
-            {assignee ? (
+            {order.assignment.assigned_to_name ? (
               <p className="text-sm leading-5 text-brand">
-                {assignee.name}
+                {order.assignment.assigned_to_name}
                 {order.assignment.claimed_at && (
                   <span className="text-muted">
                     {" "}
@@ -121,20 +132,10 @@ export function OrderDetailDialog({
             ) : (
               <div className="flex flex-col gap-2">
                 <p className="text-sm leading-5 text-muted">Not assigned yet</p>
-                <Select
-                  aria-label="Assign worker"
-                  defaultValue=""
-                  onChange={(e) => e.target.value && onAssign(e.target.value)}
-                >
-                  <option value="" disabled>
-                    Assign worker
-                  </option>
-                  {team.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.name}
-                    </option>
-                  ))}
-                </Select>
+                {/* Self-claim only — see the file-header comment. */}
+                <Button variant="outline" disabled={busy} onClick={onClaim}>
+                  Claim this order
+                </Button>
               </div>
             )}
           </section>
@@ -208,7 +209,7 @@ export function OrderDetailDialog({
             />
             <Button
               variant="outline"
-              disabled={!note.trim()}
+              disabled={busy || !note.trim()}
               onClick={() => {
                 onAddNote(note.trim());
                 setNote("");
@@ -219,18 +220,22 @@ export function OrderDetailDialog({
             </Button>
 
             {next && (
-              <Button onClick={onAdvance}>
+              <Button disabled={busy} onClick={onAdvance}>
                 Move to {ORDER_STATUS_LABEL[next]}
               </Button>
             )}
 
-            {/* Figma: bg #e8e5de, 1px rgba(155,107,143,0.4), plum label + XCircle. */}
-            {status !== "cancelled" && status !== "delivered" && (
-              <Button variant="plumOutline" onClick={onRequestCancel}>
-                <XCircle className="size-4" aria-hidden />
-                Cancel Order
-              </Button>
-            )}
+            {/* Figma: bg #e8e5de, 1px rgba(155,107,143,0.4), plum label + XCircle.
+                Only rendered once a cancel flow exists — see the file-header
+                comment on `onRequestCancel`. */}
+            {onRequestCancel &&
+              status !== "cancelled" &&
+              status !== "delivered" && (
+                <Button variant="plumOutline" disabled={busy} onClick={onRequestCancel}>
+                  <XCircle className="size-4" aria-hidden />
+                  Cancel Order
+                </Button>
+              )}
           </div>
         </TabsContent>
 
