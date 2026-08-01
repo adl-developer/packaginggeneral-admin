@@ -1,104 +1,57 @@
-"use client";
+import { unstable_rethrow } from "next/navigation";
+import { CustomersScreen } from "@/components/customers/customers-screen";
+import { getCustomers, type CustomersPayload } from "@/lib/data/customers";
 
-import * as React from "react";
-import { Search } from "lucide-react";
-import { Avatar } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
-import { CUSTOMERS } from "@/lib/data/mock";
+/** Live Medusa data — never cache. */
+export const dynamic = "force-dynamic";
 
 /**
- * Customers — Figma 3847:20531.
- * Heading 18px/600, caption 14px/400 muted, then the registered-customer table.
- * The design shows an em dash where a customer has no company.
+ * Isolated from the returned JSX on purpose, same reasoning as
+ * `inventory/page.tsx`'s `loadInventory`: eslint's react-hooks rule
+ * (correctly) flags constructing JSX inside a try/catch, since React doesn't
+ * render synchronously and the catch would never see a render error anyway.
  */
-export default function CustomersPage() {
-  const [query, setQuery] = React.useState("");
+async function loadCustomers(): Promise<
+  { ok: true; payload: CustomersPayload } | { ok: false }
+> {
+  try {
+    const payload = await getCustomers();
+    return { ok: true, payload };
+  } catch (err) {
+    // adminFetch redirects to /login by THROWING a Next.js control-flow
+    // error when the session cookie is missing/expired (see
+    // lib/medusa-admin.ts, mirrored by the same rule in every other wired
+    // screen's load helper). That must propagate — swallowing it here would
+    // tell an operator "backend unreachable" when their session just died.
+    unstable_rethrow(err);
+    // GET /admin/pg/customers takes no query params, so — same as the
+    // Overview page — there is no "operator's own bad URL" case to
+    // distinguish; anything else here is a real unreachable backend.
+    return { ok: false };
+  }
+}
 
-  const visible = CUSTOMERS.filter((c) => {
-    if (!query) return true;
-    const q = query.toLowerCase();
+/** Customers — Figma 3847:20531, wired to `GET /admin/pg/customers`. */
+export default async function CustomersPage() {
+  const result = await loadCustomers();
+
+  if (!result.ok) {
+    // Never render an empty table on failure — "no customers" and "we
+    // couldn't load customers" must not look the same, and a screen showing
+    // zero customers during an outage reads as staff having no customers.
     return (
-      c.name.toLowerCase().includes(q) ||
-      c.email.toLowerCase().includes(q) ||
-      (c.company ?? "").toLowerCase().includes(q) ||
-      c.phone.includes(q)
+      <div className="rounded-panel border border-line bg-surface p-8 text-center">
+        <p className="text-base font-semibold text-brand">
+          Customers are unavailable
+        </p>
+        <p className="mt-1 text-sm text-muted">
+          Could not reach the commerce backend. Customer figures are
+          deliberately not shown rather than guessed. Reload once the
+          backend is reachable.
+        </p>
+      </div>
     );
-  });
+  }
 
-  return (
-    <Card>
-      <CardHeader className="pb-0">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h2 className="text-lg font-semibold leading-7 text-brand">
-              Customers
-            </h2>
-            <p className="text-sm leading-5 text-muted">
-              {CUSTOMERS.length} registered customers
-            </p>
-          </div>
-          <div className="relative w-full sm:w-72">
-            <Search
-              className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted"
-              aria-hidden
-            />
-            <Input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search customers..."
-              aria-label="Search customers"
-              className="pl-9"
-            />
-          </div>
-        </div>
-      </CardHeader>
-
-      <CardContent className="pt-6">
-        {visible.length === 0 ? (
-          <p className="border-t border-line py-12 text-center text-sm text-muted">
-            No customers found
-          </p>
-        ) : (
-          <Table>
-            {/* Figma: 40px header band filled rgba(196,188,176,0.3). */}
-            <THead tinted>
-              <TR>
-                <TH>Name</TH>
-                <TH>Email</TH>
-                <TH>Phone</TH>
-                <TH>Company</TH>
-                <TH className="text-center">Orders</TH>
-              </TR>
-            </THead>
-            <TBody>
-              {visible.map((c) => (
-                <TR key={c.id}>
-                  <TD>
-                    <span className="flex items-center gap-3">
-                      <Avatar name={c.name} />
-                      <span className="font-medium">{c.name}</span>
-                    </span>
-                  </TD>
-                  <TD className="text-muted">{c.email}</TD>
-                  <TD className="whitespace-nowrap text-muted">{c.phone}</TD>
-                  <TD className={c.company ? "" : "text-muted"}>
-                    {c.company ?? "—"}
-                  </TD>
-                  {/* Figma: the order count is a brand-filled pill, not plain text. */}
-                  <TD className="text-center">
-                    <Badge tone="solid" className="tabular-nums">
-                      {c.orders}
-                    </Badge>
-                  </TD>
-                </TR>
-              ))}
-            </TBody>
-          </Table>
-        )}
-      </CardContent>
-    </Card>
-  );
+  return <CustomersScreen payload={result.payload} />;
 }
