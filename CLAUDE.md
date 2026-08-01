@@ -38,15 +38,46 @@ a page payload.
 ⚠ `proxy.ts` only checks the cookie EXISTS — it does not verify the JWT. The backend
 rejecting a bad token (handled in `lib/medusa-admin.ts`) is the real boundary.
 
-Demo mode (no `MEDUSA_BACKEND_URL`, non-production build) accepts any credentials so the
-mock screens stay reviewable. It cannot activate in a production build — don't "simplify"
-that guard in `lib/auth/config.ts`.
+⚠ **Demo mode is RETIRED as a way to review the portal.** `isDemoMode()` (no
+`MEDUSA_BACKEND_URL`, non-production build) still lets the LOGIN screen accept any
+credentials, but `adminFetch` throws `AdminApiError(503)` in demo mode and the portal
+shell itself calls it (`(portal)/layout.tsx` → `getCurrentUser()`), so with no backend
+configured EVERY portal screen — including the fixture-backed ones — lands on the
+backend-unreachable panel (`src/app/error.tsx`) rather than rendering. **Run a real
+Medusa backend to review the portal.** The guard in `lib/auth/config.ts` still must not
+be "simplified" — it is what stops a misconfigured production deploy opening up.
 
 ## Data
 
-Screens read from `src/lib/data/` and mutate through `src/lib/store.tsx`. Those two
-modules are the ONLY place that should know about mocks. When wiring Medusa, change
-them and leave the screens alone.
+**Reads** live in `src/lib/data/*` — one module per screen, each a thin seam over
+`lib/medusa-admin.ts`'s `adminFetch` (`dashboard.ts`, `orders.ts`, `customers.ts`,
+`users.ts`, `inventory.ts`, `products.ts`, `session.ts`). Server Components call them
+directly and catch their own failure to render a specific panel; no screen may fall back
+to invented figures.
+
+**Writes** are server actions in `src/lib/actions/*` (`orders.ts`, `inventory.ts`,
+`users.ts`), all going through the shared runner `src/lib/actions/run.ts` — it owns
+`adminFetch` + `revalidatePath` + the `unstable_rethrow` rule, so a dead session still
+bounces to `/login` instead of reporting "backend unreachable". Actions run on the
+server because the admin JWT is in an httpOnly cookie the browser must never see.
+
+**The current user** comes from `getCurrentUser()` in `data/session.ts`, injected once by
+`app/(portal)/layout.tsx` into `SessionProvider` (`lib/session-context.tsx`); client
+components read it with `useSession()`. The layout deliberately has no try/catch — a
+guessed role is invented data — so its failure is caught by `app/error.tsx`.
+
+⚠ **`src/lib/store.tsx` no longer exists** (deleted in Task 17). There is no shared
+client-side mutable store; don't reintroduce one.
+
+**Still on fixtures** (`src/lib/data/mock.ts`, held as local component state):
+- **Promotions** — banner editor and promo codes, both pending a follow-up spec.
+- **Settings → Platform Settings** — VAT/NHIL/GETFund/fees have no backend persistence.
+- **ProductCreator** — the create/edit product form.
+
+Every one of those shows `NOT_CONNECTED_MESSAGE` (`src/lib/not-connected.ts`) and has a
+genuinely `disabled` submit control. **Keep that pairing.** A control that looks
+functional but changes nothing is a defect here, not a placeholder — and never add a
+"Saved" confirmation to something that saves nothing.
 
 Fixtures in `mock.ts` are transcribed verbatim from Figma so built screens show the
 same numbers as the designs — if a value looks odd (revenue counting cancelled
