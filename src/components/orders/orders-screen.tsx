@@ -11,20 +11,12 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
-import {
-  addNote,
-  claimOrder,
-  fetchOrderDetail,
-  setStage,
-} from "@/lib/actions/orders";
-import type {
-  OrderDetail,
-  OrderListRow,
-  OrdersListPayload,
-} from "@/lib/data/orders";
+import { addNote, claimOrder, setStage } from "@/lib/actions/orders";
+import type { OrderListRow, OrdersListPayload } from "@/lib/data/orders";
 import { NEXT_STAGE, ORDER_STATUS_CHIP, type OrderStatus } from "@/lib/data/types";
 import { isOrderStage, stageToStatus, statusToStage } from "@/lib/stage-mapping";
 import { cn, formatDate } from "@/lib/utils";
+import { useOrderDetail } from "@/components/orders/use-order-detail";
 
 const STATUSES: OrderStatus[] = [
   "new",
@@ -36,11 +28,6 @@ const STATUSES: OrderStatus[] = [
 
 /** Mirrors the URL params the Server Component read — see page.tsx. */
 export type OrdersFilters = { stage: string; worker: string; q: string };
-
-type DetailState =
-  | { status: "loading" }
-  | { status: "error"; message: string }
-  | { status: "loaded"; order: OrderDetail };
 
 /**
  * Order Management — Figma 3835:19533 (+ filtered state 3847:20856), now wired
@@ -80,13 +67,17 @@ export function OrdersScreen({
   const [isPending, startTransition] = React.useTransition();
 
   const [queryText, setQueryText] = React.useState(filters.q);
-  const [detailId, setDetailId] = React.useState<string | null>(null);
-  const [detailState, setDetailState] = React.useState<DetailState | null>(
-    null,
-  );
+  const detail = useOrderDetail();
   const [claimingId, setClaimingId] = React.useState<string | null>(null);
-  const [dialogBusy, setDialogBusy] = React.useState(false);
-  const [dialogError, setDialogError] = React.useState<string | null>(null);
+  // Independent of the dialog: a row's Claim button can fail (most commonly
+  // a 409 — someone else claimed it first, see `lib/actions/orders.ts`) and
+  // that needs to reach the operator, not just quietly stop the button's
+  // "Claiming…" label. Keyed by row so a stale error can't attach itself to
+  // a different row after the list refreshes.
+  const [claimError, setClaimError] = React.useState<{
+    id: string;
+    message: string;
+  } | null>(null);
 
   const activeStatus: OrderStatus | "" = isOrderStage(filters.stage)
     ? stageToStatus(filters.stage)
@@ -144,88 +135,36 @@ export function OrdersScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queryText]);
 
-  async function openDetail(id: string) {
-    setDetailId(id);
-    setDetailState({ status: "loading" });
-    setDialogError(null);
-    const result = await fetchOrderDetail(id);
-    setDetailState(
-      result.ok
-        ? { status: "loaded", order: result.order }
-        : { status: "error", message: result.error },
-    );
-  }
-
-  function closeDetail() {
-    setDetailId(null);
-    setDetailState(null);
-    setDialogError(null);
-  }
-
-  async function refreshDetail(id: string) {
-    const result = await fetchOrderDetail(id);
-    if (result.ok) {
-      setDetailState({ status: "loaded", order: result.order });
-    }
-    // A refresh failure leaves the previous loaded order on screen rather
-    // than replacing it with an error — the mutation itself already
-    // succeeded (or its own error is already surfaced via dialogError); losing
-    // a good view because the FOLLOW-UP refetch hiccuped would be worse.
-  }
-
   async function handleRowClaim(id: string) {
     setClaimingId(id);
-    await claimOrder(id);
+    setClaimError(null);
+    const result = await claimOrder(id);
     setClaimingId(null);
-    router.refresh();
-  }
-
-  async function handleDialogClaim() {
-    if (!detailId) return;
-    setDialogBusy(true);
-    setDialogError(null);
-    const result = await claimOrder(detailId);
     if (!result.ok) {
-      setDialogError(result.error);
-      setDialogBusy(false);
+      // Mirrors the dialog's claim path: surface the failure, don't refresh.
+      // The backend's message already explains why (e.g. a 409 "Order
+      // already claimed by X") — the operator needs to see that, not just a
+      // button that silently stops saying "Claiming…".
+      setClaimError({ id, message: result.error });
       return;
     }
-    await refreshDetail(detailId);
     router.refresh();
-    setDialogBusy(false);
   }
 
-  async function handleAdvance() {
-    if (!detailId || detailState?.status !== "loaded") return;
-    const current = stageToStatus(detailState.order.stage);
+  function handleDialogClaim() {
+    return detail.mutate((id) => claimOrder(id));
+  }
+
+  function handleAdvance() {
+    if (detail.detailState?.status !== "loaded") return Promise.resolve();
+    const current = stageToStatus(detail.detailState.order.stage);
     const next = NEXT_STAGE[current];
-    if (!next) return;
-    setDialogBusy(true);
-    setDialogError(null);
-    const result = await setStage(detailId, statusToStage(next));
-    if (!result.ok) {
-      setDialogError(result.error);
-      setDialogBusy(false);
-      return;
-    }
-    await refreshDetail(detailId);
-    router.refresh();
-    setDialogBusy(false);
+    if (!next) return Promise.resolve();
+    return detail.mutate((id) => setStage(id, statusToStage(next)));
   }
 
-  async function handleAddNote(note: string) {
-    if (!detailId) return;
-    setDialogBusy(true);
-    setDialogError(null);
-    const result = await addNote(detailId, note);
-    if (!result.ok) {
-      setDialogError(result.error);
-      setDialogBusy(false);
-      return;
-    }
-    await refreshDetail(detailId);
-    router.refresh();
-    setDialogBusy(false);
+  function handleAddNote(note: string) {
+    return detail.mutate((id) => addNote(id, note));
   }
 
   return (
@@ -357,7 +296,7 @@ export function OrdersScreen({
                     order={order}
                     claiming={claimingId === order.id}
                     onClaim={() => handleRowClaim(order.id)}
-                    onView={() => openDetail(order.id)}
+                    onView={() => detail.open(order.id)}
                   />
                 ))}
               </TBody>
@@ -373,49 +312,70 @@ export function OrdersScreen({
         </p>
       )}
 
-      {detailId && detailState?.status === "loading" && (
-        <Dialog open onClose={closeDetail} title="Loading order…">
+      {detail.detailId && detail.detailState?.status === "loading" && (
+        <Dialog open onClose={detail.close} title="Loading order…">
           <p className="text-sm leading-5 text-muted">
             Fetching the latest order details…
           </p>
         </Dialog>
       )}
 
-      {detailId && detailState?.status === "error" && (
-        <Dialog open onClose={closeDetail} title="Couldn't load this order">
-          <p className="text-sm leading-5 text-muted">{detailState.message}</p>
+      {detail.detailId && detail.detailState?.status === "error" && (
+        <Dialog open onClose={detail.close} title="Couldn't load this order">
+          <p className="text-sm leading-5 text-muted">
+            {detail.detailState.message}
+          </p>
           <Button
             className="mt-4"
             variant="outline"
-            onClick={() => openDetail(detailId)}
+            onClick={() => detail.open(detail.detailId!)}
           >
             Try again
           </Button>
         </Dialog>
       )}
 
-      {detailId && detailState?.status === "loaded" && (
+      {detail.detailId && detail.detailState?.status === "loaded" && (
         <>
           <OrderDetailDialog
-            order={detailState.order}
+            order={detail.detailState.order}
             open
-            onClose={closeDetail}
+            onClose={detail.close}
             onClaim={handleDialogClaim}
             onAdvance={handleAdvance}
             onAddNote={handleAddNote}
-            busy={dialogBusy}
+            busy={detail.busy}
           />
-          {/* dialogError surfaces OUTSIDE the dialog's own footer (which
+          {/* detail.error surfaces OUTSIDE the dialog's own footer (which
               OrderDetailDialog owns) as a transient toast-style banner. */}
-          {dialogError && (
+          {detail.error && (
             <div
               role="alert"
               className="fixed inset-x-0 bottom-6 z-[60] mx-auto w-fit max-w-[90vw] rounded-button border border-[rgba(155,107,143,0.4)] bg-surface px-4 py-2 text-sm text-plum shadow-header"
             >
-              {dialogError}
+              {detail.error}
             </div>
           )}
         </>
+      )}
+
+      {/* Row-level claim failure — independent of the detail dialog, since
+          the row's own Claim button can fail with the dialog closed. */}
+      {claimError && (
+        <div
+          role="alert"
+          className="fixed inset-x-0 bottom-6 z-[60] mx-auto w-fit max-w-[90vw] rounded-button border border-[rgba(155,107,143,0.4)] bg-surface px-4 py-2 text-sm text-plum shadow-header"
+        >
+          {claimError.message}
+          <button
+            type="button"
+            onClick={() => setClaimError(null)}
+            aria-label="Dismiss"
+            className="ml-3 underline"
+          >
+            Dismiss
+          </button>
+        </div>
       )}
     </div>
   );
