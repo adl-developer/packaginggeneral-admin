@@ -8,8 +8,8 @@ import { Label, Textarea } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { PromotionDialog } from "@/components/promotions/promotion-dialog";
-import type { PromoCode, PromoStatus } from "@/lib/data/types";
-import { useAdmin } from "@/lib/store";
+import { PROMO_BANNER, PROMO_CODES } from "@/lib/data/mock";
+import type { PromoBanner, PromoCode, PromoStatus } from "@/lib/data/types";
 import { cn, formatCedis, formatDate } from "@/lib/utils";
 
 type Filter = "all" | PromoStatus;
@@ -20,9 +20,26 @@ const FILTERS: { key: Filter; label: string }[] = [
   { key: "archived", label: "Archived" },
 ];
 
-/** Promotions — Figma 3814:7183 (banner editor + promo codes). */
+/**
+ * Promotions — Figma 3814:7183 (banner editor + promo codes).
+ *
+ * Spec 2 (not yet built): the discount fields this screen would need don't
+ * exist in the current design. This screen stays on the fixtures in
+ * `lib/data/mock.ts`, held as local component state (session-only — nothing
+ * here is persisted) now that the shared `AdminProvider` is gone (Task 17).
+ */
 export default function PromotionsPage() {
-  const { banner, saveBanner, promoCodes, upsertPromoCode } = useAdmin();
+  const [banner, setBanner] = React.useState<PromoBanner>(PROMO_BANNER);
+  const saveBanner = setBanner;
+
+  const [promoCodes, setPromoCodes] = React.useState<PromoCode[]>(PROMO_CODES);
+  const upsertPromoCode = (code: PromoCode) =>
+    setPromoCodes((prev) => {
+      const exists = prev.some((c) => c.id === code.id);
+      return exists
+        ? prev.map((c) => (c.id === code.id ? code : c))
+        : [code, ...prev];
+    });
 
   const [live, setLive] = React.useState(banner.live);
   const [message, setMessage] = React.useState(banner.message);

@@ -24,7 +24,14 @@ import type {
  * ⚠ Specs for these two frames were NOT pulled (REST quota exhausted mid-pull);
  * geometry comes from the cached node tree. Re-run the pull script and do a
  * parity pass.
+ *
+ * Task 17 (2026-08-01): writing real products is Spec 2 (blocked on the
+ * client's MOQ-tier answer — see `docs/superpowers/specs/2026-07-31-admin-
+ * medusa-wiring-design.md` §10). The save control below is therefore always
+ * disabled and labelled, so a manager filling this form out cannot come away
+ * believing a product was created.
  */
+const NOT_CONNECTED_MESSAGE = "Not yet connected — changes are not saved.";
 const uid = (prefix: string) =>
   `${prefix}_${Math.random().toString(36).slice(2, 9)}`;
 
@@ -65,12 +72,10 @@ export function ProductCreator({
   product,
   open,
   onClose,
-  onSave,
 }: {
   product: Product | null;
   open: boolean;
   onClose: () => void;
-  onSave: (p: Product) => void;
 }) {
   const editing = Boolean(product);
 
@@ -96,25 +101,6 @@ export function ProductCreator({
   const [tiers, setTiers] = React.useState<MoqTier[]>(
     product?.tiers ?? [emptyTier()],
   );
-  const [touched, setTouched] = React.useState(false);
-
-  const invalid = !name.trim() || !basePrice || Number(basePrice) <= 0;
-
-  const submit = () => {
-    setTouched(true);
-    if (invalid) return;
-    onSave({
-      id: product?.id ?? uid("prd"),
-      name: name.trim(),
-      basePrice: Number(basePrice),
-      categorySlug: category,
-      description: description.trim(),
-      sizes,
-      materials,
-      prints,
-      tiers,
-    });
-  };
 
   return (
     <Dialog
@@ -128,13 +114,18 @@ export function ProductCreator({
       }
       width={462}
       footer={
-        <div className="flex items-center justify-end gap-2">
-          <Button variant="outline" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button onClick={submit}>
-            {editing ? "Save changes" : "Create Product"}
-          </Button>
+        <div className="flex flex-col gap-2">
+          <p className="text-xs leading-4 text-destructive">
+            {NOT_CONNECTED_MESSAGE} Writing real products is not built yet.
+          </p>
+          <div className="flex items-center justify-end gap-2">
+            <Button variant="outline" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button disabled title={NOT_CONNECTED_MESSAGE}>
+              {editing ? "Save changes" : "Create Product"}
+            </Button>
+          </div>
         </div>
       }
     >
@@ -547,12 +538,6 @@ export function ProductCreator({
           </OptionRow>
         ))}
       </Repeatable>
-
-      {touched && invalid && (
-        <p className="pt-4 text-xs text-destructive">
-          A product name and a base price above zero are required.
-        </p>
-      )}
     </Dialog>
   );
 }

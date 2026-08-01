@@ -2,7 +2,6 @@ import { PortalHeader } from "@/components/layout/portal-header";
 import { PortalTabs } from "@/components/layout/portal-tabs";
 import { getCurrentUser } from "@/lib/data/session";
 import { SessionProvider } from "@/lib/session-context";
-import { AdminProvider } from "@/lib/store";
 
 /**
  * Portal shell — every signed-in admin screen.
@@ -30,18 +29,16 @@ export default async function PortalLayout({
 
   return (
     <SessionProvider user={user}>
-      <AdminProvider>
-        <div className="flex min-h-screen flex-col">
-          <PortalHeader />
-          <main className="mx-auto w-full max-w-[1280px] flex-1 px-4 pt-14 pb-8 sm:px-10">
-            <h1 className="text-3xl font-medium leading-9 text-brand">
-              Admin Dashboard
-            </h1>
-            <PortalTabs />
-            <div className="pt-6">{children}</div>
-          </main>
-        </div>
-      </AdminProvider>
+      <div className="flex min-h-screen flex-col">
+        <PortalHeader />
+        <main className="mx-auto w-full max-w-[1280px] flex-1 px-4 pt-14 pb-8 sm:px-10">
+          <h1 className="text-3xl font-medium leading-9 text-brand">
+            Admin Dashboard
+          </h1>
+          <PortalTabs />
+          <div className="pt-6">{children}</div>
+        </main>
+      </div>
     </SessionProvider>
   );
 }
