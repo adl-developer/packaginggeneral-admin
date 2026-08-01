@@ -1,8 +1,7 @@
-"use client";
-
 import Link from "next/link";
+import { unstable_rethrow } from "next/navigation";
 import { Boxes, TrendingUp } from "lucide-react";
-import { DateFilterBar } from "@/components/layout/date-filter-bar";
+import { StatusBadge } from "@/components/orders/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import {
@@ -12,82 +11,99 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { statusCounts, summarize } from "@/lib/data";
-import { ORDERS, TOTAL_ORDERS_ALL_TIME } from "@/lib/data/mock";
-import { useDateFilter } from "@/lib/use-date-filter";
+import { getDashboard, type DashboardPayload } from "@/lib/data/dashboard";
+import { stageToStatus } from "@/lib/stage-mapping";
 import { cn, formatCedis } from "@/lib/utils";
 
-/**
- * Overview — Figma 3814:5507.
- * Four 288×172 stat cards on a 16px gap, then the 1200×498 Recent Orders card.
- *
- * ⚠ STILL MOCK DATA (`ORDERS`), not the store. Task 9 removed the orders
- * slice from `lib/store.tsx` (orders now live in `lib/actions/orders.ts` +
- * `orders/page.tsx`'s server fetch) — this screen isn't in that task's scope,
- * so it was pointed straight at the same fixture it already showed rather
- * than left broken. Task 13 ("Admin Overview wired") replaces this with a
- * live fetch; don't build further mock features on top of it meanwhile.
- */
-export default function OverviewPage() {
-  const orders = ORDERS;
-  const {
-    start,
-    end,
-    range,
-    filtered,
-    applyPreset,
-    clearRange,
-    editStart,
-    editEnd,
-  } = useDateFilter(orders);
+/** Live Medusa data — never cache. */
+export const dynamic = "force-dynamic";
 
-  const stats = summarize(filtered);
-  const counts = statusCounts(filtered);
-  const recent = [...filtered]
-    .sort((a, b) => b.placedAt.localeCompare(a.placedAt))
-    .slice(0, 5);
+/**
+ * Isolated from the returned JSX on purpose, same reasoning as
+ * `inventory/page.tsx`'s `loadInventory`: eslint's react-hooks rule
+ * (correctly) flags constructing JSX inside a try/catch, since React doesn't
+ * render synchronously and the catch would never see a render error anyway.
+ */
+async function loadDashboard(): Promise<
+  { ok: true; payload: DashboardPayload } | { ok: false }
+> {
+  try {
+    const payload = await getDashboard();
+    return { ok: true, payload };
+  } catch (err) {
+    // adminFetch redirects to /login by THROWING a Next.js control-flow
+    // error when the session cookie is missing/expired (see
+    // lib/medusa-admin.ts, mirrored by the same rule in
+    // inventory/page.tsx and orders/page.tsx). That must propagate —
+    // swallowing it here would tell an operator "backend unreachable" when
+    // their session just died.
+    unstable_rethrow(err);
+    // Unlike Inventory/Orders, `GET /admin/pg/dashboard` takes no query
+    // params, so there is no "operator's own bad URL" case to distinguish —
+    // anything else here is a real unreachable backend.
+    return { ok: false };
+  }
+}
+
+/**
+ * Overview — Figma 3814:5507, wired to `GET /admin/pg/dashboard`.
+ *
+ * The route has no date-range query params (unlike Inventory/Orders), so
+ * there is no filter bar here — the stat cards and recent-orders list always
+ * describe the current live state of the store.
+ */
+export default async function OverviewPage() {
+  const result = await loadDashboard();
+
+  if (!result.ok) {
+    // Never render zeros on failure — a revenue card reading GH₵0.00 during
+    // an outage is exactly the dangerous lie this portal must avoid. Fail
+    // visibly instead.
+    return (
+      <div className="rounded-panel border border-line bg-surface p-8 text-center">
+        <p className="text-base font-semibold text-brand">
+          Overview is unavailable
+        </p>
+        <p className="mt-1 text-sm text-muted">
+          Could not reach the commerce backend. Order and revenue figures are
+          deliberately not shown rather than guessed. Reload once the
+          backend is reachable.
+        </p>
+      </div>
+    );
+  }
+
+  const { stats, recent_orders: recentOrders } = result.payload;
 
   return (
     <>
-      <DateFilterBar
-        start={start}
-        end={end}
-        range={range}
-        onStart={editStart}
-        onEnd={editEnd}
-        onPreset={applyPreset}
-        onClear={clearRange}
-        showing={filtered.length}
-        total={TOTAL_ORDERS_ALL_TIME}
-      />
-
-      <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           label="Total Orders"
-          value={String(stats.totalOrders)}
+          value={String(stats.total_orders)}
           footer={
             <FooterNote icon={<TrendingUp className="size-4" aria-hidden />}>
-              {counts.new} new
+              {stats.new_orders} new
             </FooterNote>
           }
         />
         <StatCard
           label="In Progress"
-          value={String(stats.inProgress)}
+          value={String(stats.in_progress)}
           footer={<Badge>Active orders</Badge>}
         />
         <StatCard
           label="Active Products"
-          value={String(stats.activeProducts)}
+          value={String(stats.active_products)}
           footer={
             <FooterNote icon={<Boxes className="size-4" aria-hidden />}>
-              {stats.categories} categories
+              {stats.product_categories} categories
             </FooterNote>
           }
         />
         <StatCard
           label="Total Revenue"
-          value={formatCedis(stats.revenue)}
+          value={formatCedis(stats.total_revenue)}
           valueClassName="text-2xl leading-8"
           footer={
             /* Figma: this one footer is GREEN (#00a63e) — icon and label. */
@@ -97,6 +113,16 @@ export default function OverviewPage() {
             >
               Growing
             </FooterNote>
+          }
+          note={
+            // Surfacing `sampled` matters: silently truncating the order scan
+            // behind this card would read as "this is the total" when it is
+            // not (see `dashboard.ts`'s DashboardStats.sampled comment).
+            stats.sampled ? (
+              <p className="mt-2 text-xs text-muted">
+                Based on the most recent 1,000 orders.
+              </p>
+            ) : null
           }
         />
       </div>
@@ -115,34 +141,35 @@ export default function OverviewPage() {
         </CardHeader>
 
         <CardContent className="pt-6">
-          {recent.length === 0 ? (
+          {recentOrders.length === 0 ? (
             <p className="py-10 text-center text-sm text-muted">
-              No orders in this period.
+              No orders yet.
             </p>
           ) : (
             <ul>
-              {recent.map((order, i) => (
+              {recentOrders.map((order, i) => (
                 <li
                   key={order.id}
                   className={
-                    i === recent.length - 1
+                    i === recentOrders.length - 1
                       ? "flex items-start justify-between gap-4 py-4"
                       : "flex items-start justify-between gap-4 border-b border-line py-4 first:pt-0"
                   }
                 >
                   <div className="min-w-0">
                     <p className="truncate text-base leading-6 text-brand">
-                      {order.product}
+                      {order.first_item_title ?? "Order"}
                     </p>
                     <p className="text-sm leading-5 text-muted">
-                      {order.number} • {order.quantity.toLocaleString()} units
+                      {order.order_number} •{" "}
+                      {order.total_quantity.toLocaleString()} units
                     </p>
                   </div>
                   <div className="flex shrink-0 flex-col items-end gap-1">
                     <p className="text-base leading-6 text-brand">
                       {formatCedis(order.total)}
                     </p>
-                    <Badge>{order.status}</Badge>
+                    <StatusBadge status={stageToStatus(order.stage)} />
                   </div>
                 </li>
               ))}
@@ -159,11 +186,13 @@ function StatCard({
   value,
   valueClassName,
   footer,
+  note,
 }: {
   label: string;
   value: string;
   valueClassName?: string;
   footer: React.ReactNode;
+  note?: React.ReactNode;
 }) {
   return (
     <Card className="flex flex-col justify-between">
@@ -179,7 +208,10 @@ function StatCard({
           {value}
         </p>
       </CardHeader>
-      <CardContent className="pt-0">{footer}</CardContent>
+      <CardContent className="pt-0">
+        {footer}
+        {note}
+      </CardContent>
     </Card>
   );
 }
