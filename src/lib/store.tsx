@@ -6,15 +6,12 @@ import {
   PRODUCTS,
   PROMO_BANNER,
   PROMO_CODES,
-  TEAM,
-  CURRENT_USER_ID,
 } from "./data/mock";
 import type {
   PlatformSettings,
   Product,
   PromoBanner,
   PromoCode,
-  TeamMember,
 } from "./data/types";
 
 /**
@@ -28,15 +25,20 @@ import type {
  * `orders/page.tsx`, which read/write live Medusa data via server actions
  * instead. Mutating orders through this mock, client-only store would
  * silently diverge from the backend.
+ *
+ * The team/user roster is ALSO not part of this state (Task 16) — the Users
+ * screen now reads/writes live Medusa data via `lib/data/users.ts` and
+ * `lib/actions/users.ts`, the same seam as Orders. `currentUser` here was
+ * only ever the mock team's stand-in for "who's signed in"; the real
+ * signed-in user is `useSession()` (`lib/session-context.tsx`), populated
+ * from `GET /admin/pg/me`.
  */
 
 interface AdminState {
-  team: TeamMember[];
   products: Product[];
   promoCodes: PromoCode[];
   banner: PromoBanner;
   settings: PlatformSettings;
-  currentUser: TeamMember;
 
   saveBanner: (banner: PromoBanner) => void;
   upsertPromoCode: (code: PromoCode) => void;
@@ -44,13 +46,11 @@ interface AdminState {
 
   upsertProduct: (product: Product) => void;
   saveSettings: (settings: PlatformSettings) => void;
-  addTeamMember: (member: TeamMember) => void;
 }
 
 const AdminContext = React.createContext<AdminState | null>(null);
 
 export function AdminProvider({ children }: { children: React.ReactNode }) {
-  const [team, setTeam] = React.useState<TeamMember[]>(TEAM);
   const [products, setProducts] = React.useState<Product[]>(PRODUCTS);
   const [promoCodes, setPromoCodes] =
     React.useState<PromoCode[]>(PROMO_CODES);
@@ -58,16 +58,11 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
   const [settings, setSettings] =
     React.useState<PlatformSettings>(PLATFORM_SETTINGS);
 
-  const currentUser =
-    team.find((m) => m.id === CURRENT_USER_ID) ?? team[0];
-
   const value: AdminState = {
-    team,
     products,
     promoCodes,
     banner,
     settings,
-    currentUser,
 
     saveBanner: setBanner,
 
@@ -93,8 +88,6 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
       }),
 
     saveSettings: setSettings,
-
-    addTeamMember: (member) => setTeam((prev) => [...prev, member]),
   };
 
   return (
