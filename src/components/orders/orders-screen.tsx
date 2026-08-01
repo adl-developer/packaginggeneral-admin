@@ -72,12 +72,10 @@ export function OrdersScreen({
   // Independent of the dialog: a row's Claim button can fail (most commonly
   // a 409 — someone else claimed it first, see `lib/actions/orders.ts`) and
   // that needs to reach the operator, not just quietly stop the button's
-  // "Claiming…" label. Keyed by row so a stale error can't attach itself to
-  // a different row after the list refreshes.
-  const [claimError, setClaimError] = React.useState<{
-    id: string;
-    message: string;
-  } | null>(null);
+  // "Claiming…" label. Not scoped to a row — it renders in the shared toast
+  // stack below (see `toasts`), which is what actually determines where and
+  // how it's shown, so there's nothing here for a row id to key off.
+  const [claimError, setClaimError] = React.useState<string | null>(null);
 
   const activeStatus: OrderStatus | "" = isOrderStage(filters.stage)
     ? stageToStatus(filters.stage)
@@ -145,7 +143,7 @@ export function OrdersScreen({
       // The backend's message already explains why (e.g. a 409 "Order
       // already claimed by X") — the operator needs to see that, not just a
       // button that silently stops saying "Claiming…".
-      setClaimError({ id, message: result.error });
+      setClaimError(result.error);
       return;
     }
     router.refresh();
@@ -165,6 +163,27 @@ export function OrdersScreen({
 
   function handleAddNote(note: string) {
     return detail.mutate((id) => addNote(id, note));
+  }
+
+  // A single toast STACK rather than two independently-positioned banners.
+  // Both `detail.error` (a dialog mutation, e.g. a failed "Move to X") and
+  // `claimError` (a row's Claim button) are genuinely independent failures —
+  // the operator can trigger one, then the other, without either being
+  // resolved yet (open a different order's dialog while a still-unread row
+  // claim error is showing, for instance). Reusing the exact same fixed
+  // position for both used to mean two live errors rendered on top of each
+  // other, unreadable. Neither is dropped to fix that: both always render,
+  // stacked with a gap, each independently dismissible.
+  const toasts: { key: string; message: string; onDismiss: () => void }[] = [];
+  if (detail.error) {
+    toasts.push({ key: "dialog", message: detail.error, onDismiss: detail.clearError });
+  }
+  if (claimError) {
+    toasts.push({
+      key: "claim",
+      message: claimError,
+      onDismiss: () => setClaimError(null),
+    });
   }
 
   return (
@@ -336,45 +355,38 @@ export function OrdersScreen({
       )}
 
       {detail.detailId && detail.detailState?.status === "loaded" && (
-        <>
-          <OrderDetailDialog
-            order={detail.detailState.order}
-            open
-            onClose={detail.close}
-            onClaim={handleDialogClaim}
-            onAdvance={handleAdvance}
-            onAddNote={handleAddNote}
-            busy={detail.busy}
-          />
-          {/* detail.error surfaces OUTSIDE the dialog's own footer (which
-              OrderDetailDialog owns) as a transient toast-style banner. */}
-          {detail.error && (
-            <div
-              role="alert"
-              className="fixed inset-x-0 bottom-6 z-[60] mx-auto w-fit max-w-[90vw] rounded-button border border-[rgba(155,107,143,0.4)] bg-surface px-4 py-2 text-sm text-plum shadow-header"
-            >
-              {detail.error}
-            </div>
-          )}
-        </>
+        <OrderDetailDialog
+          order={detail.detailState.order}
+          open
+          onClose={detail.close}
+          onClaim={handleDialogClaim}
+          onAdvance={handleAdvance}
+          onAddNote={handleAddNote}
+          busy={detail.busy}
+        />
       )}
 
-      {/* Row-level claim failure — independent of the detail dialog, since
-          the row's own Claim button can fail with the dialog closed. */}
-      {claimError && (
-        <div
-          role="alert"
-          className="fixed inset-x-0 bottom-6 z-[60] mx-auto w-fit max-w-[90vw] rounded-button border border-[rgba(155,107,143,0.4)] bg-surface px-4 py-2 text-sm text-plum shadow-header"
-        >
-          {claimError.message}
-          <button
-            type="button"
-            onClick={() => setClaimError(null)}
-            aria-label="Dismiss"
-            className="ml-3 underline"
-          >
-            Dismiss
-          </button>
+      {/* Shared toast stack — see the `toasts` comment above for why this
+          isn't two independently-positioned banners. */}
+      {toasts.length > 0 && (
+        <div className="fixed inset-x-0 bottom-6 z-[60] mx-auto flex w-fit max-w-[90vw] flex-col items-center gap-2">
+          {toasts.map((t) => (
+            <div
+              key={t.key}
+              role="alert"
+              className="rounded-button border border-[rgba(155,107,143,0.4)] bg-surface px-4 py-2 text-sm text-plum shadow-header"
+            >
+              {t.message}
+              <button
+                type="button"
+                onClick={t.onDismiss}
+                aria-label="Dismiss"
+                className="ml-3 underline"
+              >
+                Dismiss
+              </button>
+            </div>
+          ))}
         </div>
       )}
     </div>

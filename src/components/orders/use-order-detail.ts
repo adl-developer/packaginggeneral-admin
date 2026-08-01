@@ -113,5 +113,9 @@ export function useOrderDetail() {
     [detailId, router],
   );
 
-  return { detailId, detailState, busy, error, open, close, mutate };
+  /** Dismisses a shown mutation error without touching anything else — the
+   *  dialog stays open on whatever it was already showing. */
+  const clearError = React.useCallback(() => setError(null), []);
+
+  return { detailId, detailState, busy, error, open, close, mutate, clearError };
 }
