@@ -4,9 +4,13 @@ import { unstable_rethrow } from "next/navigation";
 import { AdminApiError } from "@/lib/medusa-admin";
 import { getOrderDetail, type OrderDetail } from "@/lib/data/orders";
 import type { OrderStage } from "@/lib/stage-mapping";
+// ⚠ Do NOT re-export ActionResult (or any other type) from this file.
+// Next's server-actions loader emits `export type { X }` re-exports as REAL
+// runtime exports of the generated actions module, so the module evaluates to
+// `ReferenceError: X is not defined` at request time. tsc, eslint, vitest and
+// `next build` ALL pass — it only fails when a page actually renders.
+// Import the type from "./run" directly instead.
 import { run, type ActionResult } from "./run";
-
-export type { ActionResult };
 
 /**
  * Order mutations + the on-demand detail fetch behind the "View" action.

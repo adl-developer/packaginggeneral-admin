@@ -1,8 +1,9 @@
 "use server";
 
+// ⚠ Do NOT re-export a type from a "use server" file — see the note in
+// ./orders.ts. It becomes a runtime export and the module throws
+// ReferenceError at request time, with all four local checks still green.
 import { run, type ActionResult } from "./run";
-
-export type { ActionResult };
 
 /**
  * Inventory mutations.
