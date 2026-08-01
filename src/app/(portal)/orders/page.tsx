@@ -1,7 +1,14 @@
-import { unstable_rethrow } from "next/navigation";
+import { redirect, unstable_rethrow } from "next/navigation";
 import { OrdersScreen } from "@/components/orders/orders-screen";
 import { getOrders, type OrdersListPayload } from "@/lib/data/orders";
 import { AdminApiError } from "@/lib/medusa-admin";
+import {
+  ORDERS_PAGE_SIZE,
+  clampPage,
+  offsetForPage,
+  ordersHref,
+  parsePageParam,
+} from "@/lib/pagination";
 
 /** Live Medusa data — never cache. */
 export const dynamic = "force-dynamic";
@@ -20,6 +27,8 @@ async function loadOrders(params: {
   stage?: string;
   worker?: string;
   q?: string;
+  limit: number;
+  offset: number;
 }): Promise<
   | { ok: true; payload: OrdersListPayload }
   | { ok: false; reason: "invalid-filter" | "unreachable" }
@@ -37,9 +46,10 @@ async function loadOrders(params: {
     unstable_rethrow(err);
     // A 400 means the backend rejected THIS request's own query params — the
     // operator's own typo (a hand-edited URL), not an outage. Concretely that
-    // is an unrecognised `?stage=`, which `orders-ops/route.ts` now validates
-    // and rejects rather than silently ignoring (it used to return the FULL
-    // list under a filtered-looking UI, which also made this branch dead
+    // is an unrecognised `?stage=`, or a `limit`/`offset` outside the bounds
+    // the route documents, which `orders-ops/route.ts` validates and rejects
+    // rather than silently ignoring (an unrecognised stage used to return the
+    // FULL list under a filtered-looking UI, which also made this branch dead
     // code). Everything else (5xx, timeouts, DNS/connection failures) is a
     // real "can't reach the backend" and must keep the existing wording.
     const reason =
@@ -51,10 +61,10 @@ async function loadOrders(params: {
 }
 
 /**
- * Order Management — Server Component. The URL owns `stage`/`worker`/`q` (see
- * `OrdersScreen`'s file comment for why): both the fetch AND the rendered
- * chip/banner state derive from the SAME values read here, so they can never
- * describe different scopes.
+ * Order Management — Server Component. The URL owns `stage`/`worker`/`q` AND
+ * `page` (see `OrdersScreen`'s file comment for why): both the fetch AND the
+ * rendered chip/banner/pager state derive from the SAME values read here, so
+ * they can never describe different scopes.
  */
 export default async function OrdersPage({
   searchParams,
@@ -65,12 +75,28 @@ export default async function OrdersPage({
   const stage = str(sp.stage) ?? "";
   const worker = str(sp.worker) ?? "";
   const q = str(sp.q) ?? "";
+  const page = parsePageParam(str(sp.page));
 
   const result = await loadOrders({
     stage: stage || undefined,
     worker: worker || undefined,
     q: q || undefined,
+    limit: ORDERS_PAGE_SIZE,
+    offset: offsetForPage(page, ORDERS_PAGE_SIZE),
   });
+
+  // A bookmarked or shared link can point past the end of a result that has
+  // since shrunk (or of a different filter). Redirect to the last real page
+  // rather than rendering an empty table under a URL claiming page 5 — an
+  // empty table is how "no orders match" looks, and the two must not be
+  // confusable. Clamping terminates: the target is always ≤ the last page,
+  // and page 1 always exists.
+  if (result.ok) {
+    const clamped = clampPage(page, result.payload.count, result.payload.limit);
+    if (clamped !== page) {
+      redirect(ordersHref({ stage, worker, q, page: clamped }));
+    }
+  }
 
   if (!result.ok) {
     // An orders screen that renders an empty table on failure would read as
@@ -109,7 +135,7 @@ export default async function OrdersPage({
   return (
     <OrdersScreen
       payload={result.payload}
-      filters={{ stage, worker, q }}
+      filters={{ stage, worker, q, page }}
     />
   );
 }

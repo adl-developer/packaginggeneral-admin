@@ -30,11 +30,21 @@ export type OrderListRow = {
 };
 
 export type OrdersListPayload = {
+  /** ONE page of rows — `limit`/`offset` say which. */
   orders: OrderListRow[];
+  /** Total rows matching the current filters, across every page. NOT the
+   *  length of `orders`. */
   count: number;
-  total_orders: number;
+  /** The page size and window actually served (the backend clamps neither —
+   *  it 400s on an out-of-bounds `limit` — so these echo what was asked). */
+  limit: number;
+  offset: number;
+  has_more: boolean;
+  /** Per-stage totals over the whole `q`+`worker`-filtered dataset, with the
+   *  stage filter itself deliberately NOT applied — each chip answers "what
+   *  would I get if I clicked this?". Never page-scoped: a chip counting only
+   *  the visible page would be a number describing nothing. */
   stage_counts: Record<OrderStage, number>;
-  truncated: boolean;
 };
 
 export type OrderDetailCustomization = {
@@ -187,11 +197,18 @@ export async function getOrders(params: {
   stage?: string;
   worker?: string;
   q?: string;
+  limit?: number;
+  offset?: number;
 }): Promise<OrdersListPayload> {
   const qs = new URLSearchParams();
   if (params.stage) qs.set("stage", params.stage);
   if (params.worker) qs.set("worker", params.worker);
   if (params.q) qs.set("q", params.q);
+  // Always sent explicitly: the backend's own defaults (20/0) are a fallback
+  // for hand-made requests, not something the portal should silently inherit
+  // — the pager's arithmetic has to be computed against the size actually used.
+  if (params.limit != null) qs.set("limit", String(params.limit));
+  if (params.offset != null) qs.set("offset", String(params.offset));
   const s = qs.toString();
   return adminFetch<OrdersListPayload>(
     `/admin/pg/orders-ops${s ? `?${s}` : ""}`,

@@ -2,7 +2,16 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { ChevronDown, ListFilter, Search, User, Users, X } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ListFilter,
+  Search,
+  User,
+  Users,
+  X,
+} from "lucide-react";
 import { OrderDetailDialog } from "@/components/orders/order-detail-dialog";
 import { StatusBadge } from "@/components/orders/status-badge";
 import { StatusCountCards } from "@/components/orders/status-count-cards";
@@ -14,6 +23,12 @@ import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { addNote, claimOrder, setStage } from "@/lib/actions/orders";
 import type { OrderListRow, OrdersListPayload } from "@/lib/data/orders";
 import { NEXT_STAGE, ORDER_STATUS_CHIP, type OrderStatus } from "@/lib/data/types";
+import {
+  ordersHref,
+  pageCount,
+  showingLabel,
+  showingRange,
+} from "@/lib/pagination";
 import { isOrderStage, stageToStatus, statusToStage } from "@/lib/stage-mapping";
 import { cn, formatDate } from "@/lib/utils";
 import { useOrderDetail } from "@/components/orders/use-order-detail";
@@ -26,19 +41,32 @@ const STATUSES: OrderStatus[] = [
   "cancelled",
 ];
 
-/** Mirrors the URL params the Server Component read — see page.tsx. */
-export type OrdersFilters = { stage: string; worker: string; q: string };
+/** Mirrors the URL params the Server Component read — see page.tsx.
+ *  `page` is 1-based and already clamped server-side. */
+export type OrdersFilters = {
+  stage: string;
+  worker: string;
+  q: string;
+  page: number;
+};
 
 /**
  * Order Management — Figma 3835:19533 (+ filtered state 3847:20856), now wired
  * to live Medusa data.
  *
  * `payload`/`filters` come from the Server Component (orders/page.tsx),
- * fetched server-side from the URL's own `stage`/`worker`/`q` — that URL is
- * the single source of truth for what's on screen, so a status chip or the
- * worker banner can never claim a scope the fetched rows don't actually
- * match. Every filter change here re-navigates (via `router.replace`) rather
- * than filtering client-side, which is what re-triggers that server fetch.
+ * fetched server-side from the URL's own `stage`/`worker`/`q`/`page` — that
+ * URL is the single source of truth for what's on screen, so a status chip,
+ * the worker banner or the pager can never claim a scope the fetched rows
+ * don't actually match. Every filter or page change here re-navigates (via
+ * `router.replace`) rather than filtering client-side, which is what
+ * re-triggers that server fetch.
+ *
+ * ⚠ Pagination is genuinely server-side: `payload.orders` is ONE page and
+ * `payload.count` is the whole filtered total. Anything derived from
+ * `payload.orders` therefore describes the page, not the result — which is why
+ * `payload.stage_counts` (whole-dataset, backend-computed) drives the chips
+ * rather than a tally over the rows.
  *
  * ⚠ No date-range bar. Unlike Inventory (whose `ordered_in_range` is a real
  * server-computed aggregate over a window), `GET /admin/pg/orders-ops` has no
@@ -47,14 +75,15 @@ export type OrdersFilters = { stage: string; worker: string; q: string };
  * backend work outside this task's scope. Left out rather than faked.
  *
  * ⚠ The worker filter's options are derived from `payload.orders` — the
- * distinct assignees actually present in the CURRENT fetch — not from the
- * mock team roster (`lib/store.tsx`), which has no relationship to real
- * Medusa admin-user ids (Task 15/16 will give this a real backend). One
- * consequence: once a worker filter is active, the option list temporarily
- * narrows to just that worker (the fetch is now scoped to them). Clearing
- * back to "All Workers" (or the "Clear filter" banner below) restores the
- * full list. Not a lie — every option shown is always a real, currently
- * fetchable worker — just a known rough edge until a real roster exists.
+ * distinct assignees present in the CURRENT PAGE — because there is no roster
+ * on this payload to derive them from. Every option shown is always a real,
+ * currently fetchable worker, so nothing here is invented; but since the fetch
+ * became one page rather than a 500-order scan, the list is narrower than it
+ * used to be: a colleague whose orders all sit on page 4 won't appear while
+ * you're on page 1. The active worker is always kept in the list so the filter
+ * stays clearable. KNOWN LIMITATION — the fix is a real roster (either
+ * `GET /admin/pg/users`, already live, or a `workers` array on this payload),
+ * deliberately left out of the pagination change rather than bolted on.
  */
 export function OrdersScreen({
   payload,
@@ -89,32 +118,59 @@ export function OrdersScreen({
     cancelled: payload.stage_counts.cancelled,
   };
 
-  const workerOptions = React.useMemo(() => {
-    const seen = new Map<string, string>();
-    for (const o of payload.orders) {
-      if (o.assigned_to_id) {
-        seen.set(o.assigned_to_id, o.assigned_to_name ?? o.assigned_to_id);
-      }
-    }
-    return Array.from(seen, ([id, name]) => ({ id, name }));
-  }, [payload.orders]);
-
   const workerLabel =
     filters.worker === "unassigned"
       ? "Unassigned"
       : (payload.orders.find((o) => o.assigned_to_id === filters.worker)
           ?.assigned_to_name ?? filters.worker);
 
-  function navigate(next: Partial<OrdersFilters>) {
+  const workerOptions = React.useMemo(() => {
+    const seen = new Map<string, string>();
+    // The active worker first, so a filter set from another page can always be
+    // seen and cleared even when nobody on THIS page is assigned to them.
+    if (filters.worker && filters.worker !== "unassigned") {
+      seen.set(filters.worker, workerLabel);
+    }
+    for (const o of payload.orders) {
+      if (o.assigned_to_id) {
+        seen.set(o.assigned_to_id, o.assigned_to_name ?? o.assigned_to_id);
+      }
+    }
+    return Array.from(seen, ([id, name]) => ({ id, name }));
+  }, [payload.orders, filters.worker, workerLabel]);
+
+  const totalPages = pageCount(payload.count, payload.limit);
+  const range = showingRange(
+    payload.count,
+    payload.offset,
+    payload.orders.length,
+  );
+
+  /**
+   * A FILTER change. Always returns to page 1 — landing on page 5 of a filter
+   * with two pages is the classic pagination bug, and `ordersHref` drops
+   * `?page=` for page 1, so this is the default simply by not passing one.
+   */
+  function navigate(next: Partial<Omit<OrdersFilters, "page">>) {
     const merged = { ...filters, ...next };
-    const qs = new URLSearchParams();
-    if (merged.stage) qs.set("stage", merged.stage);
-    if (merged.worker) qs.set("worker", merged.worker);
-    if (merged.q) qs.set("q", merged.q);
+    push(ordersHref({ stage: merged.stage, worker: merged.worker, q: merged.q }));
+  }
+
+  /** A PAGE change. Keeps every filter exactly as-is. */
+  function goToPage(page: number) {
+    push(
+      ordersHref({
+        stage: filters.stage,
+        worker: filters.worker,
+        q: filters.q,
+        page: Math.min(Math.max(1, page), totalPages),
+      }),
+    );
+  }
+
+  function push(href: string) {
     startTransition(() => {
-      router.replace(`/orders${qs.toString() ? `?${qs}` : ""}`, {
-        scroll: false,
-      });
+      router.replace(href, { scroll: false });
     });
   }
 
@@ -324,11 +380,44 @@ export function OrdersScreen({
         </CardContent>
       </Card>
 
-      {payload.truncated && (
-        <p className="mt-4 text-center text-xs text-muted">
-          Only the most recently scanned orders are shown — the true total
-          may be higher.
-        </p>
+      {/* Pager. `payload.count` is the whole filtered total, so "Showing 1–20
+          of 137" describes the result, not the page — the operator always
+          knows where they are. Rendered whenever anything matched, including
+          single-page results (the position line is the useful half); the
+          buttons only appear once there is somewhere to go. */}
+      {payload.count > 0 && (
+        <div className="mt-4 flex flex-col items-center justify-between gap-3 sm:flex-row">
+          <p className="text-sm leading-5 text-muted">{showingLabel(range)}</p>
+
+          {totalPages > 1 && (
+            <div className="flex items-center gap-3">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={isPending || filters.page <= 1}
+                onClick={() => goToPage(filters.page - 1)}
+              >
+                <ChevronLeft className="size-4" aria-hidden />
+                Previous
+              </Button>
+              <span
+                className="text-sm leading-5 text-muted tabular-nums"
+                aria-live="polite"
+              >
+                Page {filters.page} of {totalPages}
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={isPending || !payload.has_more}
+                onClick={() => goToPage(filters.page + 1)}
+              >
+                Next
+                <ChevronRight className="size-4" aria-hidden />
+              </Button>
+            </div>
+          )}
+        </div>
       )}
 
       {detail.detailId && detail.detailState?.status === "loading" && (
