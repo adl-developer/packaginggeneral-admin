@@ -68,5 +68,31 @@ export function useDateRange(
     setRange(null);
   }, []);
 
-  return { start, end, range, applyPreset, clearRange, editStart, editEnd };
+  /**
+   * Force the control back onto a known window — for callers whose real
+   * source of truth is elsewhere (a URL the operator can change with the
+   * browser's Back button, say). Without this, local state and the fetched
+   * window drift apart on a history navigation: the bar would keep showing
+   * "Last 30d" over rows the server fetched for a different range, which is
+   * the displayed-vs-actual mismatch this whole module exists to avoid.
+   *
+   * Setting the values already held is a no-op re-render (React bails out on
+   * identical state), so a caller can safely run this on every seed change.
+   */
+  const reset = React.useCallback((next: DateRangeSeed) => {
+    setStart(next.start);
+    setEnd(next.end);
+    setRange(next.range);
+  }, []);
+
+  return {
+    start,
+    end,
+    range,
+    applyPreset,
+    clearRange,
+    editStart,
+    editEnd,
+    reset,
+  };
 }

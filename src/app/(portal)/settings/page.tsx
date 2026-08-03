@@ -1,6 +1,7 @@
 import { unstable_rethrow } from "next/navigation";
 import { SettingsScreen } from "@/components/settings/settings-screen";
-import { PLATFORM_SETTINGS } from "@/lib/data/mock";
+import { getPlatformSettings, type PlatformPayload } from "@/lib/data/platform";
+import { getProductCategories } from "@/lib/data/product-form";
 import { getProducts, type ProductsPayload } from "@/lib/data/products";
 
 /** Live Medusa data — never cache. */
@@ -34,18 +35,59 @@ async function loadProducts(): Promise<
 }
 
 /**
- * Settings — Figma 3834:15852. Product Management is wired to Medusa's own
- * `GET /admin/products` (Task 17). Platform Settings stays on fixtures — see
- * `components/settings/settings-screen.tsx` for the "not connected"
- * labelling that keeps that fact visible to whoever opens the tab.
+ * The category list the product form offers. Degrades to an EMPTY list rather
+ * than taking the page down: the form is one control on this screen, and the
+ * product list beside it is still readable without it. An empty list makes
+ * "Create Product" honestly unusable (a product must have a category) instead
+ * of offering invented options — which is what the old hardcoded
+ * `PRODUCT_CATEGORIES` fixture did, listing slugs like "tape" and
+ * "bubble-wrap" that are not categories in this store at all.
+ */
+async function loadCategories(): Promise<string[]> {
+  try {
+    return await getProductCategories();
+  } catch (err) {
+    // Same dead-session rule as loadProducts above.
+    unstable_rethrow(err);
+    return [];
+  }
+}
+
+/**
+ * Tax settings load independently of the product list: either half can fail
+ * without blanking the other, and each renders its own failure panel. A tax
+ * rate is never guessed from a default — see the panel in `settings-screen`.
+ */
+async function loadPlatform(): Promise<
+  { ok: true; payload: PlatformPayload } | { ok: false }
+> {
+  try {
+    return { ok: true, payload: await getPlatformSettings() };
+  } catch (err) {
+    // Same dead-session rule as loadProducts above.
+    unstable_rethrow(err);
+    return { ok: false };
+  }
+}
+
+/**
+ * Settings — Figma 3834:15852. Both halves are live as of 2026-08-02: Product
+ * Management on Medusa's `GET /admin/products` plus `/admin/pg/products` for
+ * create/edit/delete, and Platform Settings on
+ * `/admin/pg/settings/platform`. No fixtures remain on this screen.
  */
 export default async function SettingsPage() {
-  const productsResult = await loadProducts();
+  const [productsResult, categories, platformResult] = await Promise.all([
+    loadProducts(),
+    loadCategories(),
+    loadPlatform(),
+  ]);
 
   return (
     <SettingsScreen
       productsResult={productsResult}
-      platformSettings={PLATFORM_SETTINGS}
+      categories={categories}
+      platformResult={platformResult}
     />
   );
 }

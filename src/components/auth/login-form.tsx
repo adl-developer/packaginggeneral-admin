@@ -3,6 +3,7 @@
 import * as React from "react";
 import { useActionState } from "react";
 import { Eye, EyeOff, ShieldCheck } from "lucide-react";
+import { FormAlert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { login, type LoginState } from "@/lib/auth/actions";
@@ -74,11 +75,7 @@ export function LoginForm({ demo }: { demo: boolean }) {
           </div>
         </div>
 
-        {state.error && (
-          <p role="alert" className="text-xs leading-4 text-destructive">
-            {state.error}
-          </p>
-        )}
+        {state.error && <FormAlert>{state.error}</FormAlert>}
 
         <Button type="submit" fullWidth disabled={pending}>
           {pending ? "Signing in…" : "Sign In"}

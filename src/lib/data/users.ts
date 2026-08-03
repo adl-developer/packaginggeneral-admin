@@ -16,6 +16,11 @@ import type { TeamRole } from "@/lib/data/types";
 export type UserRow = {
   id: string;
   name: string;
+  /** The parts as well as the joined `name` — the edit dialog prefills two
+   *  fields, and splitting `name` apart guesses wrong on a two-word first
+   *  name or a user with no surname. */
+  first_name: string | null;
+  last_name: string | null;
   email: string | null;
   role: TeamRole;
   status: "active";
@@ -28,6 +33,13 @@ export type InviteRow = {
   role: TeamRole;
   status: "pending";
   joined_at: string;
+  /** When the invite's token stops working. Null when unknown — the screen
+   *  then says nothing rather than guessing a deadline.
+   *
+   *  ⚠ The invite TOKEN is never in this payload and must never be: it is a
+   *  credential that grants an admin account. Only the invitation email
+   *  carries it. */
+  expires_at: string | null;
 };
 
 export type UsersPayload = {

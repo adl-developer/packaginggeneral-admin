@@ -15,6 +15,7 @@ import {
 import { OrderDetailDialog } from "@/components/orders/order-detail-dialog";
 import { StatusBadge } from "@/components/orders/status-badge";
 import { StatusCountCards } from "@/components/orders/status-count-cards";
+import { ErrorToastStack, type ErrorToast } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
@@ -235,7 +236,7 @@ export function OrdersScreen({
   // position for both used to mean two live errors rendered on top of each
   // other, unreadable. Neither is dropped to fix that: both always render,
   // stacked with a gap, each independently dismissible.
-  const toasts: { key: string; message: string; onDismiss: () => void }[] = [];
+  const toasts: ErrorToast[] = [];
   if (detail.error) {
     toasts.push({ key: "dialog", message: detail.error, onDismiss: detail.clearError });
   }
@@ -461,28 +462,10 @@ export function OrdersScreen({
       )}
 
       {/* Shared toast stack — see the `toasts` comment above for why this
-          isn't two independently-positioned banners. */}
-      {toasts.length > 0 && (
-        <div className="fixed inset-x-0 bottom-6 z-[60] mx-auto flex w-fit max-w-[90vw] flex-col items-center gap-2">
-          {toasts.map((t) => (
-            <div
-              key={t.key}
-              role="alert"
-              className="rounded-button border border-[rgba(155,107,143,0.4)] bg-surface px-4 py-2 text-sm text-plum shadow-header"
-            >
-              {t.message}
-              <button
-                type="button"
-                onClick={t.onDismiss}
-                aria-label="Dismiss"
-                className="ml-3 underline"
-              >
-                Dismiss
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
+          isn't two independently-positioned banners. The markup itself now
+          lives in `ui/alert.tsx`, shared with the Users screen, so the two
+          don't drift the next time either one's error handling changes. */}
+      <ErrorToastStack toasts={toasts} />
     </div>
   );
 }

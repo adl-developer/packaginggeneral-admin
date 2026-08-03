@@ -1,543 +1,488 @@
 "use client";
 
 import * as React from "react";
-import { ImagePlus, Plus, Trash2 } from "lucide-react";
+import { ImagePlus } from "lucide-react";
+import { FormAlert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
-import { PRODUCT_CATEGORIES } from "@/lib/data/mock";
-import { NOT_CONNECTED_MESSAGE } from "@/lib/not-connected";
-import type {
-  MaterialOption,
-  MoqTier,
-  PrintOption,
-  Product,
-  SizeOption,
-} from "@/lib/data/types";
+import {
+  OptionsEditor,
+  ROLE_ORDER,
+  defaultTitle,
+  newBlock,
+  newValue,
+  type OptionBlock,
+  type OptionRole,
+} from "@/components/products/options-editor";
+import {
+  createProduct,
+  fetchProductForm,
+  updateProduct,
+} from "@/lib/actions/products";
+import type { ProductFormPayload, VariantInput } from "@/lib/data/product-form";
 
 /**
  * ProductCreator — Figma 3833:10813 (new) / 3833:13672 (edit), a 462px panel.
  *
- * Sections: Basic Information → Size Options → Material Options →
- * Print Options → MOQ Tiers. Every option section is repeatable with an
- * "Add …" control, exactly as designed.
+ * ⚠ DELIBERATE DIVERGENCE FROM FIGMA (2026-08-02, client-approved).
  *
- * ⚠ Specs for these two frames were NOT pulled (REST quota exhausted mid-pull);
- * geometry comes from the cached node tree. Re-run the pull script and do a
- * parity pass.
+ * The frames price a product as `basePrice × size multiplier × material
+ * multiplier × MOQ-tier multiplier`. The live catalog does not work that way:
+ * `backend/src/scripts/import-catalog.ts` gives every VARIANT its own flat
+ * price and writes `tiers: []` with the note "bulk-discount tiers removed
+ * (never client-approved)" — they were deleted from the catalog on 2026-07-24.
  *
- * Task 17 (2026-08-01): writing real products is Spec 2 (blocked on the
- * client's MOQ-tier answer — see `docs/superpowers/specs/2026-07-31-admin-
- * medusa-wiring-design.md` §10). The save control below is therefore always
- * disabled and labelled, so a manager filling this form out cannot come away
- * believing a product was created.
+ * Building the multipliers as drawn would have resurrected a rejected pricing
+ * model AND produced products this store cannot represent. So:
+ *   - Size / Material / Print sections KEEP their Figma shape, minus the
+ *     `priceMultiplier` field on each.
+ *   - The MOQ Tiers section is replaced by a single "Minimum order quantity",
+ *     which is what `metadata.moq` actually holds.
+ *   - A Variants section is added: one row per option combination, carrying
+ *     the SKU and the real GHS price. This is the catalog's actual model.
+ *
+ * ⚠ EDITING cannot restructure the option axes. Removing a size would destroy
+ * its variants, their inventory items and any staff holds, and break live
+ * carts — see the scope note on `backend/src/api/admin/pg/products/[id]/
+ * route.ts`. Those controls are disabled when editing, and the form says why.
  */
-const uid = (prefix: string) =>
-  `${prefix}_${Math.random().toString(36).slice(2, 9)}`;
 
-const emptySize = (): SizeOption => ({
-  id: uid("size"),
-  label: "",
-  priceMultiplier: 1,
-  length: 0,
-  width: 0,
-  height: 0,
-  unit: "cm",
-});
+/** Identity of a variant across axis edits — this is what lets an operator
+ *  rename a material without losing every SKU and price already typed. */
+const comboKey = (size: string, material: string, printing: string) =>
+  JSON.stringify([size, material, printing]);
 
-const emptyMaterial = (): MaterialOption => ({
-  id: uid("mat"),
-  label: "",
-  priceMultiplier: 1,
-  description: "",
-});
-
-const emptyPrint = (): PrintOption => ({
-  id: uid("print"),
-  label: "",
-  setupFee: 0,
-  pricePerUnit: 0,
-  description: "",
-});
-
-const emptyTier = (): MoqTier => ({
-  id: uid("tier"),
-  label: "",
-  minQuantity: 50,
-  maxQuantity: null,
-  priceMultiplier: 1,
-});
+type VariantDraft = { sku: string; price: string };
 
 export function ProductCreator({
-  product,
+  productId,
+  categories,
   open,
   onClose,
+  onSaved,
 }: {
-  product: Product | null;
+  /** null = create. */
+  productId: string | null;
+  categories: string[];
   open: boolean;
   onClose: () => void;
+  onSaved: () => void;
 }) {
-  const editing = Boolean(product);
+  const editing = productId !== null;
 
-  const [name, setName] = React.useState(product?.name ?? "");
-  const [category, setCategory] = React.useState(
-    product?.categorySlug ?? PRODUCT_CATEGORIES[0].slug,
-  );
-  const [description, setDescription] = React.useState(
-    product?.description ?? "",
-  );
-  const [basePrice, setBasePrice] = React.useState(
-    product ? String(product.basePrice) : "",
-  );
-  const [sizes, setSizes] = React.useState<SizeOption[]>(
-    product?.sizes ?? [emptySize()],
-  );
-  const [materials, setMaterials] = React.useState<MaterialOption[]>(
-    product?.materials ?? [emptyMaterial()],
-  );
-  const [prints, setPrints] = React.useState<PrintOption[]>(
-    product?.prints ?? [emptyPrint()],
-  );
-  const [tiers, setTiers] = React.useState<MoqTier[]>(
-    product?.tiers ?? [emptyTier()],
-  );
+  const [loading, setLoading] = React.useState(editing);
+  const [error, setError] = React.useState<string | null>(null);
+  const [saving, startSaving] = React.useTransition();
+
+  const [title, setTitle] = React.useState("");
+  const [category, setCategory] = React.useState(categories[0] ?? "");
+  const [description, setDescription] = React.useState("");
+  const [status, setStatus] = React.useState<"draft" | "published">("draft");
+  const [moq, setMoq] = React.useState("1");
+  const [features, setFeatures] = React.useState("");
+  // A new product starts with one Size option, the axis every product in this
+  // catalog has. More are added by the operator.
+  const [blocks, setBlocks] = React.useState<OptionBlock[]>(() => [
+    newBlock("size", "Size"),
+  ]);
+  const [variants, setVariants] = React.useState<Record<string, VariantDraft>>({});
+
+  // Load the product being edited.
+  //
+  // No `setLoading(true)` here: the parent gives this dialog a `key` per
+  // product, so a different product REMOUNTS the form and `loading` starts
+  // true from `useState(editing)` above. Setting it synchronously in the
+  // effect body would be a cascading render for no gain (and eslint's
+  // react-hooks/set-state-in-effect rejects it).
+  React.useEffect(() => {
+    if (!open || !editing) return;
+    let cancelled = false;
+    fetchProductForm(productId).then((result) => {
+      if (cancelled) return;
+      setLoading(false);
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      const f = result.form;
+      setTitle(f.title);
+      setCategory(f.category);
+      setDescription(f.description ?? "");
+      setStatus(f.status ?? "draft");
+      setMoq(String(f.moq ?? 1));
+      setFeatures((f.features ?? []).join("\n"));
+      // Only axes the product actually has become blocks — a product with no
+      // material choice must not open with an empty Material section inviting
+      // someone to add one (which this route refuses anyway).
+      const loaded: OptionBlock[] = [];
+      if (f.sizes?.length) {
+        loaded.push({
+          ...newBlock("size", f.optionLabels?.size || defaultTitle("size")),
+          values: f.sizes.map((s) => ({ ...newValue(), ...s })),
+        });
+      }
+      if (f.materials?.length) {
+        loaded.push({
+          ...newBlock(
+            "material",
+            f.optionLabels?.material || defaultTitle("material"),
+          ),
+          values: f.materials.map((m) => ({ ...newValue(), ...m })),
+        });
+      }
+      if (f.prints?.length) {
+        loaded.push({
+          ...newBlock("printing", defaultTitle("printing")),
+          values: f.prints.map((pr) => ({ ...newValue(), ...pr })),
+        });
+      }
+      setBlocks(loaded);
+      setVariants(
+        Object.fromEntries(
+          (f.variants ?? []).map((v) => [
+            comboKey(v.size, v.material ?? "", v.printing ?? ""),
+            { sku: v.sku, price: String(v.price) },
+          ]),
+        ),
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, editing, productId]);
+
+  // The three axes in a FIXED order, whatever order the operator added them
+  // in — the backend builds Medusa options in this same order, and a combo
+  // key that disagreed would orphan every SKU and price already typed.
+  const byRole = React.useMemo(() => {
+    const map = {} as Record<OptionRole, string[]>;
+    for (const role of ROLE_ORDER) {
+      map[role] =
+        blocks
+          .find((b) => b.role === role)
+          ?.values.map((v) => v.value.trim())
+          .filter(Boolean) ?? [];
+    }
+    return map;
+  }, [blocks]);
+
+  const combos = React.useMemo(() => {
+    const out: { key: string; size: string; material: string; printing: string }[] =
+      [];
+    for (const size of byRole.size.length ? byRole.size : [""]) {
+      for (const material of byRole.material.length ? byRole.material : [""]) {
+        for (const printing of byRole.printing.length ? byRole.printing : [""]) {
+          // ⚠ Do NOT skip the all-empty combination. A product with no
+          // options at all still has exactly one sellable variant —
+          // Shredded Paper is one, sold per pack with neither size nor
+          // material. Skipping it left an empty grid, so its real SKU and
+          // price had nowhere to render and the form refused to save a
+          // product it had just loaded.
+          out.push({
+            key: comboKey(size, material, printing),
+            size,
+            material,
+            printing,
+          });
+        }
+      }
+    }
+    return out;
+  }, [byRole]);
+
+
+  function setVariantField(key: string, field: keyof VariantDraft, value: string) {
+    setVariants((prev) => {
+      // A combination the operator hasn't touched yet has no entry at all —
+      // seed it rather than spreading `undefined` into the row.
+      const current: VariantDraft = prev[key] ?? { sku: "", price: "" };
+      return { ...prev, [key]: { ...current, [field]: value } };
+    });
+  }
+
+  /** Non-empty values of one axis, or [] when the product has no such axis. */
+  function valuesOf(role: OptionRole) {
+    return (
+      blocks.find((b) => b.role === role)?.values.filter((v) => v.value.trim()) ??
+      []
+    );
+  }
+
+  function buildPayload(): ProductFormPayload {
+    return {
+      title: title.trim(),
+      category,
+      description: description.trim(),
+      status,
+      moq: Number(moq) || 1,
+      features: features
+        .split("\n")
+        .map((f) => f.trim())
+        .filter(Boolean),
+      // The operator's own titles become the storefront's section headings
+      // (metadata.option_labels); the Medusa option titles stay Size/Material/
+      // Printing because that is what the storefront reads. See options-editor.
+      optionLabels: {
+        size: blocks.find((b) => b.role === "size")?.title.trim() || "Size",
+        material:
+          blocks.find((b) => b.role === "material")?.title.trim() || "Material",
+      },
+      sizes: valuesOf("size").map((v) => ({
+        value: v.value.trim(),
+        length: v.length ?? null,
+        width: v.width ?? null,
+        height: v.height ?? null,
+        unit: v.unit ?? "mm",
+      })),
+      materials: valuesOf("material").map((v) => ({
+        value: v.value.trim(),
+        description: v.description ?? "",
+      })),
+      prints: valuesOf("printing").map((v) => ({
+        value: v.value.trim(),
+        description: v.description ?? "",
+        setupFee: v.setupFee ?? 0,
+        perUnit: v.perUnit ?? 0,
+      })),
+      variants: combos.map<VariantInput>((c) => ({
+        size: c.size,
+        material: c.material || null,
+        printing: c.printing || null,
+        sku: variants[c.key]?.sku?.trim() ?? "",
+        price: Number(variants[c.key]?.price ?? 0),
+      })),
+    };
+  }
+
+  function submit() {
+    setError(null);
+    const payload = buildPayload();
+    startSaving(async () => {
+      const result = editing
+        ? await updateProduct(productId, payload)
+        : await createProduct(payload);
+      if (!result.ok) {
+        // The backend validates the same rules again and returns the first
+        // failure's own wording — show it rather than a generic "couldn't
+        // save", which would leave the operator hunting for which field.
+        setError(result.error);
+        return;
+      }
+      onSaved();
+    });
+  }
+
+  const busy = saving || loading;
 
   return (
     <Dialog
       open={open}
-      onClose={onClose}
+      onClose={busy ? () => {} : onClose}
       title={editing ? "Edit Product" : "Create New Product"}
       description={
         editing
-          ? "Update this product's options and pricing."
+          ? "Update this product's details, options and prices."
           : "Add a product to the catalog."
       }
-      width={462}
+      // Figma draws this panel at 462, which was fine for the frames' simple
+      // multiplier fields. The real form carries a 4-up dimension grid per
+      // size value and a SKU/price pair per variant, and those were cramped —
+      // widened at the client's request (2026-08-02). `maxWidth` only, so
+      // narrow viewports still shrink it.
+      width={640}
       footer={
         <div className="flex flex-col gap-2">
-          <p className="text-xs leading-4 text-destructive">
-            {NOT_CONNECTED_MESSAGE} Writing real products is not built yet.
-          </p>
+          {error && <FormAlert>{error}</FormAlert>}
           <div className="flex items-center justify-end gap-2">
-            <Button variant="outline" onClick={onClose}>
+            <Button variant="outline" onClick={onClose} disabled={busy}>
               Cancel
             </Button>
-            <Button disabled title={NOT_CONNECTED_MESSAGE}>
-              {editing ? "Save changes" : "Create Product"}
+            <Button onClick={submit} disabled={busy}>
+              {saving
+                ? "Saving…"
+                : editing
+                  ? "Save changes"
+                  : "Create Product"}
             </Button>
           </div>
         </div>
       }
     >
-      <Section title="Basic Information">
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="prd-name">
-              Product Name <span className="text-destructive">*</span>
-            </Label>
-            <Input
-              id="prd-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g., Standard Shipping Carton"
-            />
-          </div>
-
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="prd-category">
-              Category <span className="text-destructive">*</span>
-            </Label>
-            <Select
-              id="prd-category"
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-            >
-              {PRODUCT_CATEGORIES.map((c) => (
-                <option key={c.slug} value={c.slug}>
-                  {c.label}
-                </option>
-              ))}
-            </Select>
-          </div>
-
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="prd-desc">Description</Label>
-            <Textarea
-              id="prd-desc"
-              rows={3}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Describe the product..."
-            />
-          </div>
-
-          <div className="flex flex-col gap-2">
-            <Label>Product Image</Label>
-            <button
-              type="button"
-              className="flex h-28 w-full flex-col items-center justify-center gap-2 rounded-button border border-dashed border-line bg-background text-muted transition-colors hover:bg-line/30"
-            >
-              <ImagePlus className="size-5" aria-hidden />
-              <span className="text-xs leading-4">Click to upload photo</span>
-            </button>
-          </div>
-
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="prd-price">
-              Base Price <span className="text-destructive">*</span>
-            </Label>
-            <Input
-              id="prd-price"
-              type="number"
-              min="0"
-              step="0.01"
-              value={basePrice}
-              onChange={(e) => setBasePrice(e.target.value)}
-              placeholder="0.00"
-            />
-            <p className="text-xs leading-4 text-muted">
-              Price per unit at base MOQ
-            </p>
-          </div>
-        </div>
-      </Section>
-
-      {/* Size options */}
-      <Repeatable
-        title="Size Options"
-        addLabel="Add Size"
-        onAdd={() => setSizes((p) => [...p, emptySize()])}
-      >
-        {sizes.map((s, i) => (
-          <OptionRow
-            key={s.id}
-            title={`Size ${i + 1}`}
-            onRemove={
-              sizes.length > 1
-                ? () => setSizes((p) => p.filter((x) => x.id !== s.id))
-                : undefined
-            }
-          >
-            <TwoUp>
-              <MiniField label="Label">
+      {loading ? (
+        <p className="py-8 text-center text-sm text-muted">Loading product…</p>
+      ) : (
+        <>
+          <Section title="Basic Information">
+            <div className="flex flex-col gap-4">
+              <Field id="prd-name" label="Product Name" required>
                 <Input
-                  value={s.label}
-                  placeholder="e.g., Small"
-                  onChange={(e) =>
-                    setSizes((p) =>
-                      p.map((x) =>
-                        x.id === s.id ? { ...x, label: e.target.value } : x,
-                      ),
-                    )
-                  }
+                  id="prd-name"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="e.g., Standard Shipping Carton"
                 />
-              </MiniField>
-              <MiniField label="Price Multiplier">
-                <Input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={s.priceMultiplier}
-                  onChange={(e) =>
-                    setSizes((p) =>
-                      p.map((x) =>
-                        x.id === s.id
-                          ? { ...x, priceMultiplier: Number(e.target.value) }
-                          : x,
-                      ),
-                    )
-                  }
-                />
-              </MiniField>
-            </TwoUp>
-            <div className="grid grid-cols-4 gap-2">
-              {(["length", "width", "height"] as const).map((dim) => (
-                <MiniField
-                  key={dim}
-                  label={dim[0].toUpperCase() + dim.slice(1)}
-                >
-                  <Input
-                    type="number"
-                    min="0"
-                    value={s[dim]}
-                    onChange={(e) =>
-                      setSizes((p) =>
-                        p.map((x) =>
-                          x.id === s.id
-                            ? { ...x, [dim]: Number(e.target.value) }
-                            : x,
-                        ),
-                      )
-                    }
-                  />
-                </MiniField>
-              ))}
-              <MiniField label="Unit">
+              </Field>
+
+              <Field id="prd-category" label="Category" required>
                 <Select
-                  value={s.unit}
-                  onChange={(e) =>
-                    setSizes((p) =>
-                      p.map((x) =>
-                        x.id === s.id
-                          ? { ...x, unit: e.target.value as SizeOption["unit"] }
-                          : x,
-                      ),
-                    )
-                  }
+                  id="prd-category"
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value)}
                 >
-                  <option value="mm">mm</option>
-                  <option value="cm">cm</option>
-                  <option value="m">m</option>
+                  {categories.length === 0 && (
+                    <option value="">No categories found</option>
+                  )}
+                  {categories.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
                 </Select>
-              </MiniField>
+              </Field>
+
+              <Field id="prd-desc" label="Description">
+                <Textarea
+                  id="prd-desc"
+                  rows={3}
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="Describe the product..."
+                />
+              </Field>
+
+              <div className="grid grid-cols-2 gap-2">
+                <Field id="prd-status" label="Status">
+                  <Select
+                    id="prd-status"
+                    value={status}
+                    onChange={(e) =>
+                      setStatus(e.target.value as "draft" | "published")
+                    }
+                  >
+                    <option value="draft">Draft</option>
+                    <option value="published">Published</option>
+                  </Select>
+                </Field>
+                <Field id="prd-moq" label="Min. order qty">
+                  <Input
+                    id="prd-moq"
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={moq}
+                    onChange={(e) => setMoq(e.target.value)}
+                  />
+                </Field>
+              </div>
+              <p className="-mt-2 text-xs leading-4 text-muted">
+                A draft is not visible in the storefront.
+              </p>
+
+              <Field id="prd-features" label="Features">
+                <Textarea
+                  id="prd-features"
+                  rows={3}
+                  value={features}
+                  onChange={(e) => setFeatures(e.target.value)}
+                  placeholder={"One per line, e.g.\nFood-grade board\nRecyclable"}
+                />
+              </Field>
+
+              <div className="flex flex-col gap-2">
+                <Label>Product Image</Label>
+                {/*
+                  Genuinely disabled, not a stub that pretends. Medusa images
+                  go through its file/upload provider, which this portal has
+                  no route for yet — a button that opened a picker and threw
+                  the file away is the defect `admin/CLAUDE.md` forbids.
+                */}
+                <button
+                  type="button"
+                  disabled
+                  title="Image upload isn't wired yet — add images from the Medusa dashboard."
+                  className="flex h-28 w-full cursor-not-allowed flex-col items-center justify-center gap-2 rounded-button border border-dashed border-line bg-background text-muted opacity-60"
+                >
+                  <ImagePlus className="size-5" aria-hidden />
+                  <span className="text-xs leading-4">
+                    Add images from the Medusa dashboard
+                  </span>
+                </button>
+              </div>
             </div>
-          </OptionRow>
-        ))}
-      </Repeatable>
+          </Section>
 
-      {/* Material options */}
-      <Repeatable
-        title="Material Options"
-        addLabel="Add Material"
-        onAdd={() => setMaterials((p) => [...p, emptyMaterial()])}
-      >
-        {materials.map((m, i) => (
-          <OptionRow
-            key={m.id}
-            title={`Material ${i + 1}`}
-            onRemove={
-              materials.length > 1
-                ? () => setMaterials((p) => p.filter((x) => x.id !== m.id))
-                : undefined
-            }
-          >
-            <TwoUp>
-              <MiniField label="Label">
-                <Input
-                  value={m.label}
-                  placeholder="e.g., Single Wall Corrugated"
-                  onChange={(e) =>
-                    setMaterials((p) =>
-                      p.map((x) =>
-                        x.id === m.id ? { ...x, label: e.target.value } : x,
-                      ),
-                    )
-                  }
-                />
-              </MiniField>
-              <MiniField label="Price Multiplier">
-                <Input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={m.priceMultiplier}
-                  onChange={(e) =>
-                    setMaterials((p) =>
-                      p.map((x) =>
-                        x.id === m.id
-                          ? { ...x, priceMultiplier: Number(e.target.value) }
-                          : x,
-                      ),
-                    )
-                  }
-                />
-              </MiniField>
-            </TwoUp>
-            <MiniField label="Description">
-              <Input
-                value={m.description}
-                placeholder="Brief description"
-                onChange={(e) =>
-                  setMaterials((p) =>
-                    p.map((x) =>
-                      x.id === m.id
-                        ? { ...x, description: e.target.value }
-                        : x,
-                    ),
-                  )
-                }
-              />
-            </MiniField>
-          </OptionRow>
-        ))}
-      </Repeatable>
-
-      {/* Print options */}
-      <Repeatable
-        title="Print Options"
-        addLabel="Add Print Option"
-        onAdd={() => setPrints((p) => [...p, emptyPrint()])}
-      >
-        {prints.map((pr, i) => (
-          <OptionRow
-            key={pr.id}
-            title={`Print Option ${i + 1}`}
-            onRemove={
-              prints.length > 1
-                ? () => setPrints((p) => p.filter((x) => x.id !== pr.id))
-                : undefined
-            }
-          >
-            <MiniField label="Label">
-              <Input
-                value={pr.label}
-                placeholder="e.g., No Printing"
-                onChange={(e) =>
-                  setPrints((p) =>
-                    p.map((x) =>
-                      x.id === pr.id ? { ...x, label: e.target.value } : x,
-                    ),
-                  )
-                }
-              />
-            </MiniField>
-            <TwoUp>
-              <MiniField label="Setup Fee">
-                <Input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={pr.setupFee}
-                  onChange={(e) =>
-                    setPrints((p) =>
-                      p.map((x) =>
-                        x.id === pr.id
-                          ? { ...x, setupFee: Number(e.target.value) }
-                          : x,
-                      ),
-                    )
-                  }
-                />
-              </MiniField>
-              <MiniField label="Price Per Unit">
-                <Input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={pr.pricePerUnit}
-                  onChange={(e) =>
-                    setPrints((p) =>
-                      p.map((x) =>
-                        x.id === pr.id
-                          ? { ...x, pricePerUnit: Number(e.target.value) }
-                          : x,
-                      ),
-                    )
-                  }
-                />
-              </MiniField>
-            </TwoUp>
-            <MiniField label="Description">
-              <Input
-                value={pr.description}
-                placeholder="Brief description"
-                onChange={(e) =>
-                  setPrints((p) =>
-                    p.map((x) =>
-                      x.id === pr.id
-                        ? { ...x, description: e.target.value }
-                        : x,
-                    ),
-                  )
-                }
-              />
-            </MiniField>
-          </OptionRow>
-        ))}
-      </Repeatable>
-
-      {/* MOQ tiers */}
-      <Repeatable
-        title="MOQ Tiers"
-        addLabel="Add Tier"
-        onAdd={() => setTiers((p) => [...p, emptyTier()])}
-      >
-        {tiers.map((t, i) => (
-          <OptionRow
-            key={t.id}
-            title={`Tier ${i + 1}`}
-            onRemove={
-              tiers.length > 1
-                ? () => setTiers((p) => p.filter((x) => x.id !== t.id))
-                : undefined
-            }
-          >
-            <TwoUp>
-              <MiniField label="Min Quantity">
-                <Input
-                  type="number"
-                  min="1"
-                  value={t.minQuantity}
-                  onChange={(e) =>
-                    setTiers((p) =>
-                      p.map((x) =>
-                        x.id === t.id
-                          ? { ...x, minQuantity: Number(e.target.value) }
-                          : x,
-                      ),
-                    )
-                  }
-                />
-              </MiniField>
-              <MiniField label="Max Quantity" hint="(Optional)">
-                <Input
-                  type="number"
-                  min="1"
-                  value={t.maxQuantity ?? ""}
-                  placeholder="No maximum"
-                  onChange={(e) =>
-                    setTiers((p) =>
-                      p.map((x) =>
-                        x.id === t.id
-                          ? {
-                              ...x,
-                              maxQuantity: e.target.value
-                                ? Number(e.target.value)
-                                : null,
-                            }
-                          : x,
-                      ),
-                    )
-                  }
-                />
-              </MiniField>
-            </TwoUp>
-            <MiniField label="Price Multiplier">
-              <Input
-                type="number"
-                step="0.01"
-                min="0"
-                value={t.priceMultiplier}
-                onChange={(e) =>
-                  setTiers((p) =>
-                    p.map((x) =>
-                      x.id === t.id
-                        ? { ...x, priceMultiplier: Number(e.target.value) }
-                        : x,
-                    ),
-                  )
-                }
-              />
-            </MiniField>
-            <p className="text-xs leading-4 text-muted">
-              1.0 = base price · 0.85 = 15% off
+          {editing && (
+            <p className="mt-4 rounded-button border border-line bg-[rgba(196,188,176,0.3)] px-3 py-2 text-xs leading-4 text-muted">
+              Option values can&apos;t be added or removed here — that would
+              delete variants along with their stock and any open carts holding
+              them. Do it in the Medusa dashboard. Labels, descriptions, SKUs
+              and prices are all editable.
             </p>
-            <MiniField label="Label">
-              <Input
-                value={t.label}
-                placeholder="e.g., Base Tier"
-                onChange={(e) =>
-                  setTiers((p) =>
-                    p.map((x) =>
-                      x.id === t.id ? { ...x, label: e.target.value } : x,
-                    ),
-                  )
-                }
-              />
-            </MiniField>
-          </OptionRow>
-        ))}
-      </Repeatable>
+          )}
+
+          <OptionsEditor
+            blocks={blocks}
+            onChange={setBlocks}
+            locked={editing}
+          />
+
+          {/* ── Variants ─────────────────────────────────────────────────── */}
+          <section className="mt-6 border-t border-line pt-4">
+            <h3 className="pb-1 text-sm font-semibold leading-5 text-brand">
+              Variants &amp; Pricing
+            </h3>
+            <p className="pb-3 text-xs leading-4 text-muted">
+              One row per option combination. Each carries its own SKU and GHS
+              price — this catalog prices per variant, not by multiplier.
+            </p>
+            {combos.length === 0 ? (
+              <p className="text-xs leading-4 text-muted">
+                No variants yet — add an option value above.
+              </p>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {combos.map((c) => (
+                  <div
+                    key={c.key}
+                    className="flex flex-col gap-2 rounded-button border border-line bg-background p-3"
+                  >
+                    <p className="text-xs font-semibold leading-4 text-muted">
+                      {[c.size, c.material, c.printing]
+                        .filter(Boolean)
+                        .join(" / ") ||
+                        "Single variant — this product has no options"}
+                    </p>
+                    <TwoUp>
+                      <MiniField label="SKU">
+                        <Input
+                          value={variants[c.key]?.sku ?? ""}
+                          placeholder="PG-XXX-000"
+                          onChange={(e) =>
+                            setVariantField(c.key, "sku", e.target.value)
+                          }
+                        />
+                      </MiniField>
+                      <MiniField label="Price (GH₵)">
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={variants[c.key]?.price ?? ""}
+                          placeholder="0.00"
+                          onChange={(e) =>
+                            setVariantField(c.key, "price", e.target.value)
+                          }
+                        />
+                      </MiniField>
+                    </TwoUp>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        </>
+      )}
     </Dialog>
   );
 }
@@ -551,63 +496,28 @@ function Section({
 }) {
   return (
     <section>
-      <h3 className="pb-3 text-sm font-semibold leading-5 text-brand">
-        {title}
-      </h3>
+      <h3 className="pb-3 text-sm font-semibold leading-5 text-brand">{title}</h3>
       {children}
     </section>
   );
 }
 
-function Repeatable({
-  title,
-  addLabel,
-  onAdd,
+function Field({
+  id,
+  label,
+  required,
   children,
 }: {
-  title: string;
-  addLabel: string;
-  onAdd: () => void;
+  id: string;
+  label: string;
+  required?: boolean;
   children: React.ReactNode;
 }) {
   return (
-    <section className="mt-6 border-t border-line pt-4">
-      <div className="flex items-center justify-between gap-3 pb-3">
-        <h3 className="text-sm font-semibold leading-5 text-brand">{title}</h3>
-        <Button size="xs" variant="outline" onClick={onAdd}>
-          <Plus className="size-3.5" aria-hidden />
-          {addLabel}
-        </Button>
-      </div>
-      <div className="flex flex-col gap-3">{children}</div>
-    </section>
-  );
-}
-
-function OptionRow({
-  title,
-  onRemove,
-  children,
-}: {
-  title: string;
-  onRemove?: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex flex-col gap-2 rounded-button border border-line bg-background p-3">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-xs font-semibold leading-4 text-muted">{title}</p>
-        {onRemove && (
-          <button
-            type="button"
-            onClick={onRemove}
-            aria-label={`Remove ${title}`}
-            className="inline-flex size-6 items-center justify-center rounded-button text-muted transition-colors hover:bg-line/40 hover:text-destructive"
-          >
-            <Trash2 className="size-3.5" aria-hidden />
-          </button>
-        )}
-      </div>
+    <div className="flex flex-col gap-2">
+      <Label htmlFor={id}>
+        {label} {required && <span className="text-destructive">*</span>}
+      </Label>
       {children}
     </div>
   );

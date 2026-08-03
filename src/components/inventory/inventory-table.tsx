@@ -9,17 +9,13 @@ import {
   StockDialogs,
   type DialogRequest,
 } from "@/components/inventory/stock-dialogs";
-import { ALERT_TEXT_CLASS } from "@/components/inventory/constants";
+import {
+  ALERT_ARMED_TEXT_CLASS,
+  ALERT_TEXT_CLASS,
+} from "@/components/inventory/constants";
 import type { ProductRow, VariantRow } from "@/lib/data/inventory";
 
 const nf = new Intl.NumberFormat("en-GH");
-
-/** Marks an "Ordered" figure as a floor rather than a complete total when
- *  the backend's order scan hit its cap (aggregate.ts's `stats.sampled`) —
- *  see the footnote this pairs with in inventory-screen.tsx. */
-function fmtOrdered(n: number, sampled: boolean): string {
-  return sampled ? `${nf.format(n)}+` : nf.format(n);
-}
 
 /** Bell + "at N", or a muted "—" when no threshold is set. */
 function AlertCell({
@@ -55,9 +51,13 @@ function AlertCell({
       </span>
     );
   }
+  // Armed but not firing: Figma colours the BELL #FE9A00 and leaves the "at N"
+  // figure muted — see ALERT_ARMED_TEXT_CLASS. Don't collapse the two into one
+  // coloured span; the split is what keeps this readable as "alerting is set"
+  // rather than "alerting has tripped" (which is the rust branch above).
   return (
     <span className="inline-flex flex-col items-center gap-0.5 text-muted">
-      <Bell className="size-4" aria-hidden />
+      <Bell className={`size-4 ${ALERT_ARMED_TEXT_CLASS}`} aria-hidden />
       <span className="text-xs">at {nf.format(threshold)}</span>
     </span>
   );
@@ -65,14 +65,11 @@ function AlertCell({
 
 export function InventoryTable({
   products,
-  rangeActive,
-  sampled,
+  total,
 }: {
   products: ProductRow[];
-  rangeActive: boolean;
-  /** True when the "Ordered" figures below are a floor, not a complete
-   *  total — the backend's order scan for this window hit its cap. */
-  sampled: boolean;
+  /** Unfiltered product count — the "M" in the header's "N of M products". */
+  total: number;
 }) {
   const [expanded, setExpanded] = React.useState<Set<string>>(new Set());
   const [request, setRequest] = React.useState<DialogRequest | null>(null);
@@ -89,10 +86,19 @@ export function InventoryTable({
     <>
       <Card className="mt-5">
         <CardHeader>
-          <h2 className="flex items-center gap-2 text-lg font-semibold leading-7 text-brand">
-            <Package className="size-4 text-muted" aria-hidden />
-            Product Inventory
-          </h2>
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+            <h2 className="flex items-center gap-2 text-lg font-semibold leading-7 text-brand">
+              <Package className="size-4 text-muted" aria-hidden />
+              Product Inventory
+            </h2>
+            {/* Baseline-matched to the title, right-aligned — the count reads
+                as a caption for this list. Same 12px muted treatment it had at
+                the right of the removed date bar. */}
+            <p className="text-xs leading-4 text-muted">
+              {nf.format(products.length)} of {nf.format(total)} product
+              {total === 1 ? "" : "s"}
+            </p>
+          </div>
         </CardHeader>
 
         <CardContent>
@@ -101,7 +107,7 @@ export function InventoryTable({
               No products match these filters
             </p>
           ) : (
-            <Table>
+            <Table bleed>
               {/* Figma 3992:2915 (design-reference/admin/specs-inventory.txt):
                   "Table Row 1198x41 bg=196,188,176@0.3" — tinted like
                   Customers/Users, not plain like Orders. */}
@@ -110,16 +116,6 @@ export function InventoryTable({
                   <TH>Product</TH>
                   <TH className="text-center">Total Stock</TH>
                   <TH className="text-center">Orders Used</TH>
-                  <TH
-                    className="text-center"
-                    title={
-                      sampled
-                        ? "Over 1,000 orders matched this window — figures marked \"+\" only count the most recently scanned ones."
-                        : undefined
-                    }
-                  >
-                    {rangeActive ? "Ordered in range" : "Ordered (all time)"}
-                  </TH>
                   <TH className="text-center">Reserved</TH>
                   <TH className="text-center">Available</TH>
                   <TH className="text-center">Alert</TH>
@@ -155,9 +151,6 @@ export function InventoryTable({
                         </TD>
                         <TD className="text-center tabular-nums">{nf.format(p.total_stock)}</TD>
                         <TD className="text-center tabular-nums">{nf.format(p.orders_used)}</TD>
-                        <TD className="text-center tabular-nums">
-                          {fmtOrdered(p.ordered_in_range, sampled)}
-                        </TD>
                         <TD className="text-center tabular-nums">{nf.format(p.reserved)}</TD>
                         <TD className="text-center font-medium tabular-nums">
                           {nf.format(p.available)}
@@ -208,9 +201,6 @@ export function InventoryTable({
                             </TD>
                             <TD className="text-center tabular-nums">{nf.format(v.total_stock)}</TD>
                             <TD className="text-center tabular-nums">{nf.format(v.orders_used)}</TD>
-                            <TD className="text-center tabular-nums">
-                              {fmtOrdered(v.ordered_in_range, sampled)}
-                            </TD>
                             <TD className="text-center tabular-nums">{nf.format(v.reserved)}</TD>
                             <TD className="text-center font-medium tabular-nums">
                               {nf.format(v.available)}

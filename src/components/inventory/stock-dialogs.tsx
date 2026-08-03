@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
+import { FormAlert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label, Textarea } from "@/components/ui/input";
@@ -140,7 +141,7 @@ function StockDialog({
             . Negative adjustments are allowed so a mistyped figure can be
             corrected; stock never goes below zero.
           </p>
-          {error && <p className="text-xs text-destructive">{error}</p>}
+          {error && <FormAlert>{error}</FormAlert>}
         </div>
       </Dialog>
     );
@@ -242,7 +243,7 @@ function StockDialog({
               ))}
             </div>
           )}
-          {error && <p className="text-xs text-destructive">{error}</p>}
+          {error && <FormAlert>{error}</FormAlert>}
         </div>
       </Dialog>
     );
@@ -304,7 +305,7 @@ function StockDialog({
             : "Applies to this variant only."}{" "}
           Clearing the field turns alerting off.
         </p>
-        {error && <p className="text-xs text-destructive">{error}</p>}
+        {error && <FormAlert>{error}</FormAlert>}
       </div>
     </Dialog>
   );

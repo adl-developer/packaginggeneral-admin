@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
-import { AdminApiError, adminFetch } from "@/lib/medusa-admin";
+import { AdminApiError, adminFetch, operatorMessage } from "@/lib/medusa-admin";
 
 /**
  * Shared server-action runner.
@@ -33,11 +33,16 @@ export async function run(
     // any other handling, or the bounce-to-login never happens and the
     // operator is told "backend unreachable" when their session just died.
     unstable_rethrow(err);
-    if (err instanceof AdminApiError) {
-      // The backend's message is written for an operator — surface it rather
-      // than replacing it with something vaguer.
-      return { ok: false, error: err.message };
-    }
-    return { ok: false, error: "Could not reach the backend. Try again." };
+    // The full diagnostic — method, path, status, backend message — goes to
+    // the SERVER log, which is where it's actionable. What goes back to the
+    // browser is `operatorMessage()`: the backend's own sentence for a 4xx
+    // refusal, never the route and resource id `err.message` embeds.
+    //
+    // A 4xx is an expected refusal (a self-demotion, an already-claimed
+    // order), so it logs at warn; anything else is a genuine fault.
+    const level =
+      err instanceof AdminApiError && err.status < 500 ? "warn" : "error";
+    console[level](`[admin-action] ${method} ${path} failed`, err);
+    return { ok: false, error: operatorMessage(err) };
   }
 }

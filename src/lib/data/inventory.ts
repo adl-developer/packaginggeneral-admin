@@ -62,15 +62,26 @@ export type InventoryPayload = {
   };
 };
 
-export async function getInventory(
-  start?: string,
-  end?: string,
-): Promise<InventoryPayload> {
-  const params = new URLSearchParams();
-  if (start) params.set("start", start);
-  if (end) params.set("end", end);
-  const qs = params.toString();
-  return adminFetch<InventoryPayload>(
-    `/admin/pg/inventory${qs ? `?${qs}` : ""}`,
-  );
+/**
+ * ⚠ `ordered=none` is deliberate, and it is a PERFORMANCE guard, not a
+ * cosmetic one.
+ *
+ * The "Ordered in range" column and its date bar were removed on 2026-08-02.
+ * The figure behind them costs a scan of up to ORDER_SCAN_CAP (1,000) orders
+ * with all their line items, on every single load of this screen. Simply
+ * dropping the start/end params would have made that WORSE, not free: with no
+ * window the same scan runs unfiltered, over the whole order history, for a
+ * column nobody renders.
+ *
+ * So the seam tells the backend not to compute it at all. The route keeps
+ * full support for start/end and still computes the figure for anyone who
+ * asks — re-enabling the column is dropping this one param plus the UI, with
+ * no backend change. See `backend/src/api/admin/pg/inventory/route.ts`.
+ *
+ * `ordered_in_range` is still present on the payload types below and reads 0
+ * under this param. Do NOT render it without removing the param first: a
+ * genuine zero and "not computed" would be indistinguishable.
+ */
+export async function getInventory(): Promise<InventoryPayload> {
+  return adminFetch<InventoryPayload>("/admin/pg/inventory?ordered=none");
 }

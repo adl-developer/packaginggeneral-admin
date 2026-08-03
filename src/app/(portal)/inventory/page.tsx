@@ -1,40 +1,9 @@
-import { redirect, unstable_rethrow } from "next/navigation";
+import { unstable_rethrow } from "next/navigation";
 import { getInventory, type InventoryPayload } from "@/lib/data/inventory";
-import { AdminApiError } from "@/lib/medusa-admin";
 import { InventoryScreen } from "@/components/inventory/inventory-screen";
-import type { RangeKey } from "@/components/layout/date-filter-bar";
-import { presetRange } from "@/lib/date-range-math";
 
 /** Live Medusa data — never cache. */
 export const dynamic = "force-dynamic";
-
-const PRESET_KEYS = ["7d", "30d", "60d", "90d"] as const;
-type PresetKey = (typeof PRESET_KEYS)[number];
-
-function isPresetKey(v: unknown): v is PresetKey {
-  return typeof v === "string" && (PRESET_KEYS as readonly string[]).includes(v);
-}
-
-function str(v: string | string[] | undefined): string | undefined {
-  return typeof v === "string" ? v : undefined;
-}
-
-/**
- * Default "Last 30d" scope, expressed as URL params. Shares its date
- * arithmetic with the client's `presetRange` (`@/lib/date-range-math` —
- * directive-free, so it's safely importable from this Server Component;
- * `use-date-range.ts` re-exports the same function for client call sites).
- * Duplicating this used to be necessary before that extraction; now both
- * sides call the identical formula, so they can't drift apart.
- */
-function defaultRangeParams(): URLSearchParams {
-  const { from, to } = presetRange("30d");
-  const qs = new URLSearchParams();
-  qs.set("start", from);
-  qs.set("end", to);
-  qs.set("range", "30d");
-  return qs;
-}
 
 /**
  * Isolated from the returned JSX on purpose: eslint's react-hooks rule
@@ -43,106 +12,41 @@ function defaultRangeParams(): URLSearchParams {
  * Keeping the try/catch in a plain async function and branching on its
  * result afterwards gets the same fail-visible behaviour without that trap.
  */
-async function loadInventory(
-  start: string | undefined,
-  end: string | undefined,
-): Promise<
-  | { ok: true; payload: InventoryPayload }
-  | { ok: false; reason: "invalid-range" | "unreachable" }
+async function loadInventory(): Promise<
+  { ok: true; payload: InventoryPayload } | { ok: false }
 > {
   try {
-    const payload = await getInventory(start, end);
+    const payload = await getInventory();
     return { ok: true, payload };
   } catch (err) {
     // adminFetch redirects to /login by THROWING a Next.js control-flow
     // error when the session cookie is missing/expired (see
     // lib/medusa-admin.ts, mirrored by the same rule in
-    // lib/actions/inventory.ts's `run()`). That must propagate — swallowing
-    // it here would tell an operator "backend unreachable" when their
-    // session just died.
+    // lib/actions/run.ts). That must propagate — swallowing it here would
+    // tell an operator "backend unreachable" when their session just died.
     unstable_rethrow(err);
-    // A 400 means the backend rejected THIS request's own start/end query
-    // params (GET /admin/pg/inventory's isIsoDate check — a hand-edited URL
-    // like ?start=notadate) — that's the operator's own typo, not an outage.
-    // Everything else (5xx, timeouts, DNS/connection failures) is a real
-    // "can't reach the backend" and must keep the existing wording.
-    const reason =
-      err instanceof AdminApiError && err.status === 400
-        ? "invalid-range"
-        : "unreachable";
-    return { ok: false, reason };
+    return { ok: false };
   }
 }
 
 /**
- * The date range is a real query scope, not decoration: `getInventory`'s
- * `ordered_in_range` column is computed server-side for whatever start/end
- * this page asks for, so the URL is the single source of truth for "what
- * window is this page showing" — both the fetch AND the "Ordered in
- * range"/"Ordered (all time)" label below derive from it, and neither can
- * drift from the other.
+ * ⚠ This page took a date range until 2026-08-02 (`?start=&end=&range=`, with
+ * a redirect to a default Last 30d window). The client asked for the date bar
+ * and the "Ordered in range" column it scoped to be removed, and the two only
+ * ever made sense together — so the URL carries no scope any more and every
+ * load shows the same current stock position.
  *
- * URL shapes:
- *   /inventory                          → never seen after the redirect below;
- *                                          means "first visit, no scope chosen yet"
- *   /inventory?range=all                → explicit clear — genuinely all-time
- *   /inventory?start=..&end=..&range=Nd → a preset chip
- *   /inventory?start=..&end=..          → a hand-edited custom window
+ * The old "invalid date range" failure branch went with them: it existed for a
+ * hand-edited `?start=notadate`, and this page no longer sends start or end,
+ * so the backend's 400 for a malformed date is unreachable from here. A
+ * failure is a failure again — one panel.
  */
-export default async function InventoryPage({
-  searchParams,
-}: {
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
-}) {
-  const sp = await searchParams;
-  const rawRange = str(sp.range);
-  const rawStart = str(sp.start);
-  const rawEnd = str(sp.end);
-
-  const hasAnyParam = Boolean(rawRange || rawStart || rawEnd);
-  if (!hasAnyParam) {
-    // Default Last 30d, matching the active chip in the Figma frame — redirect
-    // to the canonical URL BEFORE fetching so the very first render's data and
-    // its label are scoped to the same window instead of racing each other.
-    redirect(`/inventory?${defaultRangeParams().toString()}`);
-  }
-
-  const isAllTime = rawRange === "all";
-  const start = isAllTime ? undefined : rawStart;
-  const end = isAllTime ? undefined : rawEnd;
-  const rangeActive = !isAllTime && Boolean(start || end);
-  // Only light up a preset chip when the range it names is actually the one
-  // in effect — a hand-crafted `?range=30d` with no start/end is genuinely
-  // all-time data (no date filter reaches getInventory below), so the chip
-  // must NOT claim "30d" over it; that would be the same displayed-vs-actual
-  // mismatch this whole rewrite exists to prevent, just relocated to the chip.
-  const presetKey = rangeActive && isPresetKey(rawRange) ? rawRange : null;
-
-  const result = await loadInventory(start, end);
+export default async function InventoryPage() {
+  const result = await loadInventory();
 
   if (!result.ok) {
     // An inventory screen that renders zeros on failure would read as "no
-    // stock" — the most dangerous possible lie here. Fail visibly instead,
-    // but with copy matched to the actual cause: a bad URL is the operator's
-    // own typo, not an outage, and telling them the backend is down sends
-    // them hunting for a problem that doesn't exist.
-    if (result.reason === "invalid-range") {
-      return (
-        <div className="rounded-panel border border-line bg-surface p-8 text-center">
-          <p className="text-base font-semibold text-brand">
-            Invalid date range
-          </p>
-          <p className="mt-1 text-sm text-muted">
-            The start/end dates in this link aren&apos;t valid — the backend
-            is reachable, this URL just isn&apos;t.{" "}
-            <a href="/inventory" className="underline">
-              Go back to the default range
-            </a>{" "}
-            or fix the dates in the filter bar above.
-          </p>
-        </div>
-      );
-    }
+    // stock" — the most dangerous possible lie here. Fail visibly instead.
     return (
       <div className="rounded-panel border border-line bg-surface p-8 text-center">
         <p className="text-base font-semibold text-brand">
@@ -156,15 +60,5 @@ export default async function InventoryPage({
     );
   }
 
-  return (
-    <InventoryScreen
-      payload={result.payload}
-      initialRange={{
-        start: start ?? "",
-        end: end ?? "",
-        range: (presetKey ?? null) as RangeKey,
-        active: rangeActive,
-      }}
-    />
-  );
+  return <InventoryScreen payload={result.payload} />;
 }

@@ -17,16 +17,18 @@ import { adminFetch } from "@/lib/medusa-admin";
  *     — the client's sheets arrived without real pricing. This flag MUST
  *     ride along so the UI never presents a placeholder figure as final.
  *
- * ⚠ SCOPED TO PUBLISHED PRODUCTS, deliberately. `GET /admin/pg/dashboard`
- * counts `filters: { status: "published" }` for its "Active Products" stat;
- * this call previously had no status filter at all, so drafts counted here
- * and not there and the two screens would state different catalog sizes with
- * nothing on either explaining the gap. Published is the side that was made
- * to match, not the other way round: this portal has no draft workflow (the
- * ProductCreator is deliberately disabled — see product-creator.tsx), so a
- * draft row would be a product staff can neither act on nor account for.
- * If drafts ever become actionable here, label the count on BOTH screens
- * rather than silently widening one.
+ * ⚠ ALL STATUSES, as of 2026-08-02 — this was published-only until the
+ * ProductCreator became real. Drafts are now actionable (staff create and
+ * edit them here), so hiding them would hide products that exist.
+ *
+ * The old comment here demanded that widening this be LABELLED rather than
+ * silent, because `GET /admin/pg/dashboard` counts
+ * `filters: { status: "published" }` for its "Active Products" stat and two
+ * screens quietly stating different catalog sizes is the bug that rule
+ * exists to prevent. So: `count` below is the TOTAL, `draft_count` is carried
+ * alongside it, and the Settings header names both. Overview's card still
+ * says "Active Products" and still counts published — the two now disagree
+ * visibly and for a stated reason, which is the point.
  *
  * No mock path: a catalog screen showing invented numbers is worse than one
  * showing an error, because staff act on it.
@@ -44,6 +46,7 @@ type MedusaProductVariant = {
 type MedusaProduct = {
   id: string;
   title: string;
+  status?: string | null;
   thumbnail: string | null;
   metadata: Record<string, unknown> | null;
   categories?: MedusaProductCategory[] | null;
@@ -57,9 +60,16 @@ type MedusaProductListResponse = {
   limit: number;
 };
 
+/** Medusa's product statuses. `proposed` and `rejected` exist in the enum but
+ *  nothing in this project produces them; they are carried through rather than
+ *  collapsed into "draft" so an unexpected one is visible instead of
+ *  mislabelled. */
+export type ProductStatus = "draft" | "published" | "proposed" | "rejected";
+
 export type ProductRow = {
   id: string;
   title: string;
+  status: ProductStatus;
   thumbnail: string | null;
   /** First category name, or null when the product has none. */
   category: string | null;
@@ -79,8 +89,12 @@ export type ProductRow = {
 
 export type ProductsPayload = {
   products: ProductRow[];
-  /** PUBLISHED products only — same scope as the Overview stat card. */
+  /** EVERY status. Deliberately NOT the same scope as Overview's "Active
+   *  Products" card, which counts published only — see the header note. */
   count: number;
+  /** How many of `count` are drafts. Lets the header say so out loud instead
+   *  of leaving the gap with Overview unexplained. */
+  draftCount: number;
   /** True when the catalog has more products than this page fetched
    *  (`limit=100`) — the current catalog is ~11 products, so this should
    *  stay false, but it must never silently under-report a bigger one. */
@@ -96,6 +110,7 @@ function toProductRow(p: MedusaProduct): ProductRow {
   return {
     id: p.id,
     title: p.title,
+    status: (p.status as ProductStatus) ?? "draft",
     thumbnail: p.thumbnail ?? null,
     category: p.categories?.[0]?.name ?? null,
     variantCount: p.variants?.length ?? 0,
@@ -106,16 +121,24 @@ function toProductRow(p: MedusaProduct): ProductRow {
 }
 
 export async function getProducts(): Promise<ProductsPayload> {
-  // `status` is an ARRAY param on Medusa's admin product list validator
-  // (`AdminGetProductsParams.status: z.array(ProductStatus)`), hence the
-  // `status[]=` form — a bare `status=published` is rejected.
+  // No `status[]=` filter: every status. (When one IS wanted, note that
+  // Medusa's admin list validator types it as an ARRAY —
+  // `AdminGetProductsParams.status: z.array(ProductStatus)` — so it must be
+  // sent as `status[]=published`; a bare `status=published` is rejected.)
   const res = await adminFetch<MedusaProductListResponse>(
-    "/admin/products?limit=100&status[]=published&fields=id,title,thumbnail,metadata,*categories,*variants",
+    "/admin/products?limit=100&fields=id,title,status,thumbnail,metadata,*categories,*variants",
   );
 
+  const products = res.products.map(toProductRow);
+
   return {
-    products: res.products.map(toProductRow),
+    products,
     count: res.count,
+    // Counted from the fetched rows, not the API — Medusa returns no
+    // per-status breakdown, and a second round trip for a number this small
+    // isn't worth it. Under truncation it under-reports, which is why the
+    // header only shows it alongside the truncation note.
+    draftCount: products.filter((p) => p.status === "draft").length,
     truncated: res.count > res.products.length,
   };
 }

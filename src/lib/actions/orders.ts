@@ -1,7 +1,7 @@
 "use server";
 
 import { unstable_rethrow } from "next/navigation";
-import { AdminApiError } from "@/lib/medusa-admin";
+import { AdminApiError, operatorMessage } from "@/lib/medusa-admin";
 import { getOrderDetail, type OrderDetail } from "@/lib/data/orders";
 import type { OrderStage } from "@/lib/stage-mapping";
 // ⚠ Do NOT re-export ActionResult (or any other type) from this file.
@@ -91,11 +91,12 @@ export async function fetchOrderDetail(
     const order = await getOrderDetail(id);
     return { ok: true, order };
   } catch (err) {
-    // Same redirect-swallowing trap as `run()` — see its comment.
+    // Same redirect-swallowing trap as `run()` — see its comment. Same split
+    // too: diagnostic to the log, operator-safe sentence to the dialog.
     unstable_rethrow(err);
-    if (err instanceof AdminApiError) {
-      return { ok: false, error: err.message };
-    }
-    return { ok: false, error: "Could not reach the backend. Try again." };
+    const level =
+      err instanceof AdminApiError && err.status < 500 ? "warn" : "error";
+    console[level](`[admin-action] GET order detail ${id} failed`, err);
+    return { ok: false, error: operatorMessage(err) };
   }
 }

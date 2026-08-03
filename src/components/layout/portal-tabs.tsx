@@ -18,6 +18,14 @@ import type { TeamRole } from "@/lib/data/types";
  *   admin         → everything except Users
  *   order-manager → Overview, Orders, Customers only
  *
+ * ⚠ CUSTOMERS IS VISIBLE TO EVERY ROLE — confirmed by the user 2026-08-02, and
+ * a deliberate divergence from the design annotation. Figma `3803:4077` says
+ * non-super-admins should see "Overview, Orders, Promotions and Settings",
+ * omitting Customers. Do NOT restrict this tab to match that note in a
+ * design-parity pass; the annotation predates the Customers screen
+ * (`3847:20531`) and the client has since decided everyone gets it. It also
+ * matches the backend, which role-gates nothing under `/admin/pg/customers`.
+ *
  * ⚠ This hides navigation; it is NOT access control. Enforce the same rules on
  * the API before any of this is wired to real data.
  */

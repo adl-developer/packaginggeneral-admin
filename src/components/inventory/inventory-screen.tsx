@@ -1,13 +1,10 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
 import { Bell, Boxes, Package, Search } from "lucide-react";
-import { DateFilterBar, type RangeKey } from "@/components/layout/date-filter-bar";
 import { InventoryTable } from "@/components/inventory/inventory-table";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input, Select } from "@/components/ui/input";
-import { useDateRange } from "@/lib/use-date-range";
 import type { InventoryPayload, ProductRow } from "@/lib/data/inventory";
 
 export type StockLevelFilter = "all" | "in-stock" | "low" | "out";
@@ -95,54 +92,24 @@ function StatCard({
 }
 
 /**
- * What the server actually used for THIS payload: the fetched
- * `ordered_in_range` figures and the "Ordered in range"/"Ordered (all time)"
- * label both derive from this, never from the date bar's own live client
- * state — that's what keeps the label from ever describing a window the
- * data wasn't actually scoped to (see page.tsx's URL-is-the-source-of-truth
- * comment).
- */
-export type InitialInventoryRange = {
-  start: string;
-  end: string;
-  range: RangeKey;
-  active: boolean;
-};
-
-/**
  * Inventory — Figma 3992:2915. No mobile frame exists for this screen (all 36
  * mobile-admin frames were checked); the shared Table component's own
  * `overflow-x-auto` wrapper is how narrow viewports are handled here, same as
  * Orders/Customers/Users.
  *
  * The page-level "Admin Dashboard" H1 already comes from the portal layout —
- * this screen starts directly with the filter bar, matching the Overview
- * screen's structure (KPI cards, no second heading).
+ * this screen starts directly with the KPI cards, matching the Overview
+ * screen's structure (no second heading).
+ *
+ * ⚠ The date-range bar and the "Ordered in range" column were REMOVED on
+ * 2026-08-02 at the client's request. They were a pair: the bar existed only
+ * to scope that column, so neither is useful without the other. The backend
+ * still supports the window — `GET /admin/pg/inventory` accepts start/end and
+ * `aggregate.ts` still computes `ordered_in_range` — it is simply no longer
+ * requested (see `lib/data/inventory.ts`). Re-enabling is a UI change plus
+ * dropping the `ordered=none` param, not a backend rewrite.
  */
-export function InventoryScreen({
-  payload,
-  initialRange,
-}: {
-  payload: InventoryPayload;
-  initialRange: InitialInventoryRange;
-}) {
-  const router = useRouter();
-  const [isPending, startTransition] = React.useTransition();
-
-  // Seeds the date bar's own interactive state from the EXACT window the
-  // server just fetched — not a preset key the hook would have to re-derive
-  // from "now". Re-deriving would drift on a reopened tab, a bookmark, a
-  // shared link, or just a refresh after midnight: the fetch and label would
-  // still describe the original window, but the two date inputs would show
-  // a freshly-computed one, indefinitely, until someone touched the bar.
-  // Passing the literal `initialRange` values instead means the inputs can
-  // never disagree with what's actually on screen. The `range` key still
-  // drives which preset chip lights up.
-  const range = useDateRange({
-    start: initialRange.start,
-    end: initialRange.end,
-    range: initialRange.range,
-  });
+export function InventoryScreen({ payload }: { payload: InventoryPayload }) {
 
   const [search, setSearch] = React.useState("");
   const [category, setCategory] = React.useState("all");
@@ -162,56 +129,9 @@ export function InventoryScreen({
     [payload.products, search, category, stockLevel, alert],
   );
 
-  // Skip the very first effect run: the server already fetched exactly what
-  // the URL says, so re-issuing that same navigation would be a wasted round
-  // trip. Every REAL change after that — a preset click or a hand-edited
-  // date — pushes the new window into the URL, which re-runs the server
-  // component and refetches `getInventory` scoped to it. This is a
-  // navigation (an external system), not local setState, so it belongs in an
-  // effect rather than during render.
-  const mounted = React.useRef(false);
-  React.useEffect(() => {
-    if (!mounted.current) {
-      mounted.current = true;
-      return;
-    }
-    const qs = new URLSearchParams();
-    if (range.range) {
-      // A preset chip: carry both the resolved dates and which chip it was.
-      qs.set("start", range.start);
-      qs.set("end", range.end);
-      qs.set("range", range.range);
-    } else if (range.start || range.end) {
-      // A hand-edited date with no matching chip.
-      if (range.start) qs.set("start", range.start);
-      if (range.end) qs.set("end", range.end);
-    } else {
-      // Explicitly cleared — genuinely all-time, not "unspecified" (an empty
-      // URL means "never chosen yet" server-side and would redirect back to
-      // Last 30d, undoing the clear).
-      qs.set("range", "all");
-    }
-    startTransition(() => {
-      router.replace(`/inventory?${qs.toString()}`, { scroll: false });
-    });
-  }, [range.start, range.end, range.range, router]);
-
   return (
-    <div className={isPending ? "opacity-60 transition-opacity" : "transition-opacity"}>
-      <DateFilterBar
-        start={range.start}
-        end={range.end}
-        range={range.range}
-        onStart={range.editStart}
-        onEnd={range.editEnd}
-        onPreset={range.applyPreset}
-        onClear={range.clearRange}
-        showing={visible.length}
-        total={payload.products.length}
-        noun="products"
-      />
-
-      <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           label="Products Tracked"
           value={payload.stats.products_tracked}
@@ -238,6 +158,21 @@ export function InventoryScreen({
         />
       </div>
 
+      {/*
+        Figma `Container 1200x60 pad=24/0/0/0 LAY=HORIZONTAL gap=12`: one row of
+        Input 652 · Button 176 · Button 176 · Button 160. 652 + 3×12 + 512 =
+        1200 exactly, so the three selects are FIXED at their Figma widths and
+        the search box takes whatever is left — that arithmetic is what makes
+        the row land on a single line at the design's 1200px content width.
+
+        Previously every Select inherited the shared `w-full`, which inside a
+        flex row resolves against the ROW, so each one claimed the full width
+        and the group wrapped onto three lines well before it needed to.
+        `shrink-0` keeps them at their Figma size instead of being squeezed
+        thinner as the search box grows; `flex-wrap` is what still stacks them
+        cleanly below 1200 rather than overflowing (no mobile frame exists for
+        this screen — see the component doc above).
+      */}
       <div className="mt-5 flex flex-wrap items-center gap-3">
         <div className="relative min-w-56 flex-1">
           <Search
@@ -257,6 +192,7 @@ export function InventoryScreen({
           value={category}
           onChange={(e) => setCategory(e.target.value)}
           aria-label="Filter by category"
+          className="w-44 shrink-0"
         >
           <option value="all">All Categories</option>
           {categories.map((c) => (
@@ -270,6 +206,7 @@ export function InventoryScreen({
           value={stockLevel}
           onChange={(e) => setStockLevel(e.target.value as StockLevelFilter)}
           aria-label="Filter by stock level"
+          className="w-44 shrink-0"
         >
           <option value="all">All Stock Levels</option>
           <option value="in-stock">In stock</option>
@@ -281,6 +218,7 @@ export function InventoryScreen({
           value={alert}
           onChange={(e) => setAlert(e.target.value as AlertFilter)}
           aria-label="Filter by alert state"
+          className="w-40 shrink-0"
         >
           <option value="all">All Alerts</option>
           <option value="in-alert">In alert</option>
@@ -288,26 +226,27 @@ export function InventoryScreen({
         </Select>
       </div>
 
-      <InventoryTable
-        products={visible}
-        rangeActive={initialRange.active}
-        sampled={payload.stats.sampled === true}
-      />
+      {/*
+        The "N of M products" count used to live at the right of the date bar.
+        That bar is gone, but the count is not decoration — with four filters
+        above it, an operator has to be able to tell "no results" apart from
+        "one result". It now sits in the table card's own header, opposite the
+        title, so it reads as a caption for the list it counts. `total` is the
+        UNFILTERED product count, which is why it comes from the payload here
+        rather than from the rows the table was handed.
+      */}
+      <InventoryTable products={visible} total={payload.products.length} />
 
       <p className="mt-4 text-center text-xs text-muted">
         Available = Total Stock − Orders Used − Reserved · Stock alert fires at
         or below the threshold you set
       </p>
-      {payload.stats.sampled && (
-        // Edge case, not an error state — the order scan behind "Ordered"
-        // hit its cap (ORDER_SCAN_CAP in the backend aggregate), so those
-        // figures are a floor, not a complete total. Kept as a footnote,
-        // same register as the line above, rather than anything alarming.
-        <p className="mt-1 text-center text-xs text-muted">
-          Figures marked &quot;+&quot; reflect only the most recently scanned
-          orders in this window — the true total may be higher.
-        </p>
-      )}
+      {/*
+        No "+" sampling footnote here any more. It existed solely to caveat the
+        removed "Ordered" column — `payload.stats.sampled` describes that
+        column's order scan and nothing else on this screen, so keeping the
+        note would caveat figures that are no longer shown.
+      */}
     </div>
   );
 }
