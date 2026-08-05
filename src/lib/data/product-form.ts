@@ -49,6 +49,8 @@ export type ProductFormPayload = {
   sizes: SizeInput[];
   materials?: MaterialInput[];
   prints?: PrintInput[];
+  images?: string[];
+  thumbnail?: string | null;
   variants: VariantInput[];
 };
 

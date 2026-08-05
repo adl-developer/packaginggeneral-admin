@@ -1,7 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { ImagePlus } from "lucide-react";
+import Image from "next/image";
+import { ChevronDown, ChevronUp, ImagePlus, X } from "lucide-react";
 import { FormAlert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
@@ -18,9 +19,11 @@ import {
 import {
   createProduct,
   fetchProductForm,
+  uploadProductImages,
   updateProduct,
 } from "@/lib/actions/products";
 import type { ProductFormPayload, VariantInput } from "@/lib/data/product-form";
+import { validateProductImageFiles } from "@/lib/product-media";
 
 /**
  * ProductCreator — Figma 3833:10813 (new) / 3833:13672 (edit), a 462px panel.
@@ -81,6 +84,8 @@ export function ProductCreator({
   const [status, setStatus] = React.useState<"draft" | "published">("draft");
   const [moq, setMoq] = React.useState("1");
   const [features, setFeatures] = React.useState("");
+  const [images, setImages] = React.useState<string[]>([]);
+  const [thumbnail, setThumbnail] = React.useState<string | null>(null);
   // A new product starts with one Size option, the axis every product in this
   // catalog has. More are added by the operator.
   const [blocks, setBlocks] = React.useState<OptionBlock[]>(() => [
@@ -112,6 +117,8 @@ export function ProductCreator({
       setStatus(f.status ?? "draft");
       setMoq(String(f.moq ?? 1));
       setFeatures((f.features ?? []).join("\n"));
+      setImages(f.images ?? []);
+      setThumbnail(f.thumbnail ?? f.images?.[0] ?? null);
       // Only axes the product actually has become blocks — a product with no
       // material choice must not open with an empty Material section inviting
       // someone to add one (which this route refuses anyway).
@@ -220,6 +227,8 @@ export function ProductCreator({
         .split("\n")
         .map((f) => f.trim())
         .filter(Boolean),
+      images,
+      thumbnail,
       // The operator's own titles become the storefront's section headings
       // (metadata.option_labels); the Medusa option titles stay Size/Material/
       // Printing because that is what the storefront reads. See options-editor.
@@ -253,6 +262,57 @@ export function ProductCreator({
         price: Number(variants[c.key]?.price ?? 0),
       })),
     };
+  }
+
+  function selectImages(event: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files ?? []);
+    event.target.value = "";
+    if (!files.length) return;
+
+    const validation = validateProductImageFiles(files);
+    if (validation.length) {
+      setError(validation[0]);
+      return;
+    }
+    if (images.length + files.length > 8) {
+      setError("A product can have no more than 8 images.");
+      return;
+    }
+
+    setError(null);
+    startSaving(async () => {
+      const result = await uploadProductImages(files);
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      setImages((current) => {
+        const next = [...current, ...result.urls];
+        setThumbnail((currentThumbnail) => currentThumbnail ?? next[0] ?? null);
+        return next;
+      });
+    });
+  }
+
+  function removeImage(url: string) {
+    setImages((current) => {
+      const next = current.filter((image) => image !== url);
+      setThumbnail((currentThumbnail) =>
+        currentThumbnail === url ? next[0] ?? null : currentThumbnail,
+      );
+      return next;
+    });
+  }
+
+  function moveImage(url: string, direction: -1 | 1) {
+    setImages((current) => {
+      const index = current.indexOf(url);
+      const target = index + direction;
+      if (index < 0 || target < 0 || target >= current.length) return current;
+      const next = [...current];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
   }
 
   function submit() {
@@ -390,7 +450,7 @@ export function ProductCreator({
               </Field>
 
               <div className="flex flex-col gap-2">
-                <Label>Product Image</Label>
+                <Label>Product Images</Label>
                 {/*
                   Genuinely disabled, not a stub that pretends. Medusa images
                   go through its file/upload provider, which this portal has
@@ -401,13 +461,22 @@ export function ProductCreator({
                   type="button"
                   disabled
                   title="Image upload isn't wired yet — add images from the Medusa dashboard."
-                  className="flex h-28 w-full cursor-not-allowed flex-col items-center justify-center gap-2 rounded-button border border-dashed border-line bg-background text-muted opacity-60"
+                  className="hidden"
                 >
                   <ImagePlus className="size-5" aria-hidden />
                   <span className="text-xs leading-4">
                     Add images from the Medusa dashboard
                   </span>
                 </button>
+                <ProductMediaUploader
+                  images={images}
+                  thumbnail={thumbnail}
+                  busy={busy}
+                  onSelect={selectImages}
+                  onSetThumbnail={setThumbnail}
+                  onMove={moveImage}
+                  onRemove={removeImage}
+                />
               </div>
             </div>
           </Section>
@@ -484,6 +553,107 @@ export function ProductCreator({
         </>
       )}
     </Dialog>
+  );
+}
+
+function ProductMediaUploader({
+  images,
+  thumbnail,
+  busy,
+  onSelect,
+  onSetThumbnail,
+  onMove,
+  onRemove,
+}: {
+  images: string[];
+  thumbnail: string | null;
+  busy: boolean;
+  onSelect: (event: React.ChangeEvent<HTMLInputElement>) => void;
+  onSetThumbnail: (url: string) => void;
+  onMove: (url: string, direction: -1 | 1) => void;
+  onRemove: (url: string) => void;
+}) {
+  return (
+    <>
+      <label
+        htmlFor="prd-images"
+        className="flex h-28 cursor-pointer flex-col items-center justify-center gap-2 rounded-button border border-dashed border-line bg-background text-muted transition-colors hover:bg-line/30"
+      >
+        <ImagePlus className="size-5" aria-hidden />
+        <span className="text-xs leading-4">
+          Add JPEG, PNG, WebP, or AVIF images
+        </span>
+        <input
+          id="prd-images"
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/avif"
+          multiple
+          className="sr-only"
+          disabled={busy}
+          onChange={onSelect}
+        />
+      </label>
+      <p className="text-xs leading-4 text-muted">
+        Up to 8 images, 5 MB each. The selected thumbnail appears on product
+        cards and receipts.
+      </p>
+      {images.length > 0 && (
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {images.map((url, index) => (
+            <div
+              key={url}
+              className="relative overflow-hidden rounded-button border border-line bg-background"
+            >
+                        <Image
+                          src={url}
+                          alt={"Product image " + (index + 1)}
+                          width={160}
+                          height={160}
+                          className="aspect-square w-full object-cover"
+                        />
+              <div className="flex items-center justify-between gap-1 p-1">
+                <button
+                  type="button"
+                  onClick={() => onSetThumbnail(url)}
+                  className="rounded px-1.5 py-1 text-xs font-medium text-brand hover:bg-line/30"
+                  aria-pressed={thumbnail === url}
+                >
+                  {thumbnail === url ? "Thumbnail" : "Set cover"}
+                </button>
+                <div className="flex items-center">
+                  <button
+                    type="button"
+                    onClick={() => onMove(url, -1)}
+                    disabled={index === 0}
+                    aria-label={"Move image " + (index + 1) + " earlier"}
+                    className="rounded p-1 hover:bg-line/30 disabled:opacity-30"
+                  >
+                    <ChevronUp className="size-3.5" aria-hidden />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onMove(url, 1)}
+                    disabled={index === images.length - 1}
+                    aria-label={"Move image " + (index + 1) + " later"}
+                    className="rounded p-1 hover:bg-line/30 disabled:opacity-30"
+                  >
+                    <ChevronDown className="size-3.5" aria-hidden />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onRemove(url)}
+                    aria-label={"Remove image " + (index + 1)}
+                    className="rounded p-1 text-destructive hover:bg-line/30"
+                  >
+                    <X className="size-3.5" aria-hidden />
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
   );
 }
 

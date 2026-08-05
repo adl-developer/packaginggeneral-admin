@@ -99,7 +99,8 @@ export async function adminFetch<T>(
   const res = await fetch(`${MEDUSA_BACKEND_URL}${path}`, {
     ...init,
     headers: {
-      "Content-Type": "application/json",
+      // Let fetch generate the multipart boundary for file uploads.
+      ...(init.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
       ...init.headers,
       Authorization: `Bearer ${token}`,
     },

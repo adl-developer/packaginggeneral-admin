@@ -1,7 +1,7 @@
 "use server";
 
 import { unstable_rethrow } from "next/navigation";
-import { AdminApiError, operatorMessage } from "@/lib/medusa-admin";
+import { AdminApiError, adminFetch, operatorMessage } from "@/lib/medusa-admin";
 import {
   getProductForm,
   type LoadedProductForm,
@@ -11,6 +11,37 @@ import {
 // ./orders.ts. It becomes a runtime export and the module throws
 // ReferenceError at request time, with all four local checks still green.
 import { run, type ActionResult } from "./run";
+import { validateProductImageFiles } from "@/lib/product-media";
+
+type UploadResponse = {
+  files: { id: string; url: string }[];
+};
+
+/**
+ * Sends image bytes to Medusa, which then writes them to the backend's R2
+ * provider. The browser never receives R2 credentials or the admin JWT.
+ */
+export async function uploadProductImages(
+  files: File[],
+): Promise<{ ok: true; urls: string[] } | { ok: false; error: string }> {
+  const validation = validateProductImageFiles(files);
+  if (validation.length) return { ok: false, error: validation[0] };
+
+  const body = new FormData();
+  for (const file of files) body.append("files", file);
+
+  try {
+    const response = await adminFetch<UploadResponse>("/admin/uploads", {
+      method: "POST",
+      body,
+    });
+    return { ok: true, urls: response.files.map((file) => file.url) };
+  } catch (err) {
+    unstable_rethrow(err);
+    console.error("[admin-action] product image upload failed", err);
+    return { ok: false, error: operatorMessage(err) };
+  }
+}
 
 /**
  * Product create/edit mutations, behind Settings → Product Management.
